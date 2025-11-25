@@ -1,0 +1,485 @@
+Loja;Processo;Amostra;Minutos;Tempo Médio;Desvio;Número de Amostras
+Nevaldo Rocha;Devolução;1;11,167;13,025;1,597;4
+Nevaldo Rocha;Devolução;2;12,45;13,025;1,597;4
+Nevaldo Rocha;Devolução;3;14,917;13,025;1,597;4
+Nevaldo Rocha;Devolução;4;13,567;13,025;1,597;4
+Nevaldo Rocha;Reposição de prateleira (estoque);1;1,217;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);2;5,5;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);3;4,6;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);4;1,75;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);5;3,033;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);6;4,05;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);7;2,833;3,069;1,545;8
+Nevaldo Rocha;Reposição de prateleira (estoque);8;1,567;3,069;1,545;8
+Nevaldo Rocha;Abertura e acompanhamento de chamado;1;40;40;0;1
+Nevaldo Rocha;Criação de conteúdo;1;5;5;0;1
+Nevaldo Rocha;elaboração de calendário do ciclo e divulgação;1;60;60;0;1
+Nevaldo Rocha;Encontro de ciclo;1;40;40;0;1
+Nevaldo Rocha;Eventos para os revendedores;1;225;225;0;1
+Nevaldo Rocha;Atualização de cadastro de revendedor ;1;7,267;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;2;3,85;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;3;23,017;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;4;10,1;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;5;12,083;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;6;6,533;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor ;7;2,217;9,295;6,931;7
+Nevaldo Rocha;Cadastro de revendedor ;1;5,617;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor ;2;15,1;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor ;3;9,167;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor ;4;14,817;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor ;5;7,517;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor ;6;10,883;10,517;3,859;6
+Nevaldo Rocha;Faturamente de pedido (retirada e delivery);1;18,467;9,254;6,429;4
+Nevaldo Rocha;Faturamente de pedido (retirada e delivery);2;7,417;9,254;6,429;4
+Nevaldo Rocha;Faturamente de pedido (retirada e delivery);3;7,633;9,254;6,429;4
+Nevaldo Rocha;Faturamente de pedido (retirada e delivery);4;3,5;9,254;6,429;4
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);1;15,883;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);2;2,717;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);3;6,417;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);4;3,867;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);5;0,967;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);6;3,383;5,207;4,979;7
+Nevaldo Rocha;Separação de mercadoria (on-line e retirada);7;3,217;5,207;4,979;7
+Nevaldo Rocha;Venda em caixa;1;7,45;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;2;21,8;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;3;9,567;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;4;10,133;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;5;19,717;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;6;13;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;7;14;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;8;8;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;9;13;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;10;7,083;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;11;9,25;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;12;4,933;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;13;3,833;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;14;5,667;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;15;11,417;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;16;9,933;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;17;8,833;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;18;9,517;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;19;6,667;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;20;28,25;11,102;6,041;20
+Nevaldo Rocha;Atendimento ao cliente ;1;6,333;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;2;1,933;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;3;5,1;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;4;14,45;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;5;1,333;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;6;0,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;7;4,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;8;2,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;9;1,167;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;10;0,867;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;11;3,65;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;12;6,15;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;13;5,25;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;14;3,483;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;15;3,1;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;16;1,117;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;17;13,667;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;18;1,167;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente ;19;5,667;4,365;3,906;19
+Parnamirim;Reposição de prateleira;1;11,333;11,333;0;1
+Parnamirim;Criação de conteúdo;1;20;20;0;1
+Parnamirim;elaboração de calendário do ciclo e divulgação;1;20;20;0;1
+Parnamirim;Encontro de ciclo;1;330;330;0;1
+Parnamirim;Eventos para os revendedores;1;150;150;0;1
+Parnamirim;Produção de flyer ;1;15;15;0;1
+Parnamirim;Atualização de cadastro de revendedor ;1;2,583;2,583;0;1
+Parnamirim;Cadastro de revendedor ;1;7,667;7,667;0;1
+Parnamirim;Venda em caixa;1;9,433;13,705;7,999;14
+Parnamirim;Venda em caixa;2;7,7;13,705;7,999;14
+Parnamirim;Venda em caixa;3;23,667;13,705;7,999;14
+Parnamirim;Venda em caixa;4;25,767;13,705;7,999;14
+Parnamirim;Venda em caixa;5;8;13,705;7,999;14
+Parnamirim;Venda em caixa;6;16,833;13,705;7,999;14
+Parnamirim;Venda em caixa;7;7,833;13,705;7,999;14
+Parnamirim;Venda em caixa;8;12,667;13,705;7,999;14
+Parnamirim;Venda em caixa;9;7,383;13,705;7,999;14
+Parnamirim;Venda em caixa;10;4,233;13,705;7,999;14
+Parnamirim;Venda em caixa;11;28,417;13,705;7,999;14
+Parnamirim;Venda em caixa;12;17,05;13,705;7,999;14
+Parnamirim;Venda em caixa;13;4,833;13,705;7,999;14
+Parnamirim;Venda em caixa;14;18,05;13,705;7,999;14
+Parnamirim;Atendimento ao cliente ;1;11,267;12,738;7,911;4
+Parnamirim;Atendimento ao cliente ;2;2,95;12,738;7,911;4
+Parnamirim;Atendimento ao cliente ;3;22;12,738;7,911;4
+Parnamirim;Atendimento ao cliente ;4;14,733;12,738;7,911;4
+Parnamirim;Atendimento online;1;11,217;5,142;4,073;4
+Parnamirim;Atendimento online;2;3,45;5,142;4,073;4
+Parnamirim;Atendimento online;3;3,4;5,142;4,073;4
+Parnamirim;Atendimento online;4;2,5;5,142;4,073;4
+Extremoz;Mudança de planograma ;1;91,65;91,65;0;1
+Extremoz;Devolução;1;1,633;1,633;0;1
+Extremoz;Reposição de prateleira (estoque);1;19,5;15,225;3,042;4
+Extremoz;Reposição de prateleira (estoque);2;15,233;15,225;3,042;4
+Extremoz;Reposição de prateleira (estoque);3;13,483;15,225;3,042;4
+Extremoz;Reposição de prateleira (estoque);4;12,683;15,225;3,042;4
+Extremoz;Criação de conteúdo;1;30;30;0;1
+Extremoz;Encontro de ciclo;1;80;80;0;1
+Extremoz;Limpeza da ER ;1;20;20;0;1
+Extremoz;Limpeza dos banheiros ;1;15;15;0;1
+Extremoz;Cadastro de revendedor ;1;5,817;5,817;0;1
+Extremoz;Faturamente de pedido (retirada e delivery);1;3,5;3,5;0;1
+Extremoz;Separação de mercadoria (on-line e retirada);1;3,6;5,328;1,833;3
+Extremoz;Separação de mercadoria (on-line e retirada);2;7,25;5,328;1,833;3
+Extremoz;Separação de mercadoria (on-line e retirada);3;5,133;5,328;1,833;3
+Extremoz;Venda em caixa;1;9,833;12,915;5,118;8
+Extremoz;Venda em caixa;2;18,25;12,915;5,118;8
+Extremoz;Venda em caixa;3;15,25;12,915;5,118;8
+Extremoz;Venda em caixa;4;19;12,915;5,118;8
+Extremoz;Venda em caixa;5;17,667;12,915;5,118;8
+Extremoz;Venda em caixa;6;8,567;12,915;5,118;8
+Extremoz;Venda em caixa;7;7,25;12,915;5,118;8
+Extremoz;Venda em caixa;8;7,5;12,915;5,118;8
+Extremoz;Atendimento ao cliente ;1;1,667;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;2;2,117;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;3;3,667;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;4;1,167;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;5;1,333;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;6;4;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;7;3,45;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;8;1,083;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;9;3,5;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;10;2,917;2,62;1,163;11
+Extremoz;Atendimento ao cliente ;11;3,917;2,62;1,163;11
+Extremoz;Atendimento online;1;6,467;6,65;0,259;2
+Extremoz;Atendimento online;2;6,833;6,65;0,259;2
+Extremoz;Ativações on-line (Cessados);1;30;30;0;1
+Partage;Reposição de prateleira;1;1,45;1,45;0;1
+Partage;Cadastro de revendedor ;1;13;21,5;12,021;2
+Partage;Cadastro de revendedor ;2;30;21,5;12,021;2
+Partage;Faturamente de pedido (retirada e delivery);1;13,783;7,147;3,401;6
+Partage;Faturamente de pedido (retirada e delivery);2;6,867;7,147;3,401;6
+Partage;Faturamente de pedido (retirada e delivery);3;6,467;7,147;3,401;6
+Partage;Faturamente de pedido (retirada e delivery);4;6,017;7,147;3,401;6
+Partage;Faturamente de pedido (retirada e delivery);5;5,783;7,147;3,401;6
+Partage;Faturamente de pedido (retirada e delivery);6;3,967;7,147;3,401;6
+Partage;Venda em caixa;1;6,25;15,19;10,074;15
+Partage;Venda em caixa;2;10,583;15,19;10,074;15
+Partage;Venda em caixa;3;16,833;15,19;10,074;15
+Partage;Venda em caixa;4;16,417;15,19;10,074;15
+Partage;Venda em caixa;5;20,333;15,19;10,074;15
+Partage;Venda em caixa;6;35;15,19;10,074;15
+Partage;Venda em caixa;7;12,217;15,19;10,074;15
+Partage;Venda em caixa;8;5,933;15,19;10,074;15
+Partage;Venda em caixa;9;6,8;15,19;10,074;15
+Partage;Venda em caixa;10;6,9;15,19;10,074;15
+Partage;Venda em caixa;11;18,05;15,19;10,074;15
+Partage;Venda em caixa;12;7,6;15,19;10,074;15
+Partage;Venda em caixa;13;11,283;15,19;10,074;15
+Partage;Venda em caixa;14;39,3;15,19;10,074;15
+Partage;Venda em caixa;15;14,35;15,19;10,074;15
+Partage;Atendimento ao cliente ;1;6,8;16,464;11,543;11
+Partage;Atendimento ao cliente ;2;5;16,464;11,543;11
+Partage;Atendimento ao cliente ;3;8,417;16,464;11,543;11
+Partage;Atendimento ao cliente ;4;20;16,464;11,543;11
+Partage;Atendimento ao cliente ;5;19,95;16,464;11,543;11
+Partage;Atendimento ao cliente ;6;8,283;16,464;11,543;11
+Partage;Atendimento ao cliente ;7;13,067;16,464;11,543;11
+Partage;Atendimento ao cliente ;8;15,183;16,464;11,543;11
+Partage;Atendimento ao cliente ;9;42,567;16,464;11,543;11
+Partage;Atendimento ao cliente ;10;31,333;16,464;11,543;11
+Partage;Atendimento ao cliente ;11;10,5;16,464;11,543;11
+Itabaiana;Reposição de prateleira;1;8,267;6,25;1,992;3
+Itabaiana;Reposição de prateleira;2;4,283;6,25;1,992;3
+Itabaiana;Reposição de prateleira;3;6,2;6,25;1,992;3
+Itabaiana;Abertura e acompanhamento de chamado;1;20;20;0;1
+Itabaiana;Criação de conteúdo;1;40;40;0;1
+Itabaiana;elaboração de calendário do ciclo e divulgação;1;150;150;0;1
+Itabaiana;Encontro de ciclo;1;30;30;0;1
+Itabaiana;Eventos para os revendedores;1;420;420;0;1
+Itabaiana;Limpeza da ER ;1;20;20;0;1
+Itabaiana;Limpeza dos banheiros ;1;20;20;0;1
+Itabaiana;Produção de flyer ;1;10;10;0;1
+Itabaiana;Fechamento de caixa;1;30;30;0;1
+Itabaiana;digitalização de boletos ;1;3;1,731;0,763;6
+Itabaiana;digitalização de boletos ;2;2,05;1,731;0,763;6
+Itabaiana;digitalização de boletos ;3;0,8;1,731;0,763;6
+Itabaiana;digitalização de boletos ;4;1,75;1,731;0,763;6
+Itabaiana;digitalização de boletos ;5;1,617;1,731;0,763;6
+Itabaiana;digitalização de boletos ;6;1,167;1,731;0,763;6
+Itabaiana;Faturamente de pedido (retirada e delivery);1;6,867;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);2;5,917;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);3;5,9;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);4;5,567;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);5;5,35;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);6;4,8;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);7;4,233;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);8;4,133;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);9;3,45;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);10;1,25;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);11;1,933;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);12;1,75;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);13;1,75;3,889;1,933;14
+Itabaiana;Faturamente de pedido (retirada e delivery);14;1,55;3,889;1,933;14
+Itabaiana;Separação de mercadoria (on-line e retirada);1;5,2;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);2;3,617;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);3;3,083;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);4;1,217;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);5;1,167;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);6;1,733;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);7;3,133;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);8;1,217;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);9;1,567;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);10;2,45;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);11;2,5;2,815;1,758;12
+Itabaiana;Separação de mercadoria (on-line e retirada);12;6,9;2,815;1,758;12
+Itabaiana;Venda em caixa;1;15,067;17,475;14,639;10
+Itabaiana;Venda em caixa;2;6,033;17,475;14,639;10
+Itabaiana;Venda em caixa;3;14,1;17,475;14,639;10
+Itabaiana;Venda em caixa;4;4,65;17,475;14,639;10
+Itabaiana;Venda em caixa;5;27,25;17,475;14,639;10
+Itabaiana;Venda em caixa;6;8,283;17,475;14,639;10
+Itabaiana;Venda em caixa;7;53,283;17,475;14,639;10
+Itabaiana;Venda em caixa;8;24,033;17,475;14,639;10
+Itabaiana;Venda em caixa;9;7,3;17,475;14,639;10
+Itabaiana;Venda em caixa;10;14,75;17,475;14,639;10
+Itabaiana;Atendimento ao cliente ;1;16,967;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;2;3,833;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;3;1,05;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;4;12,667;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;5;12,217;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;6;8,167;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;7;3,917;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;8;1,7;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;9;5,583;6,827;5,458;10
+Itabaiana;Atendimento ao cliente ;10;2,167;6,827;5,458;10
+Itabaiana;Atendimento online;1;37;38,333;17,039;3
+Itabaiana;Atendimento online;2;22;38,333;17,039;3
+Itabaiana;Atendimento online;3;56;38,333;17,039;3
+Campina;Devolução;1;4,117;4,117;0;1
+Campina;Reposição de prateleira;1;5,033;5,888;1,423;14
+Campina;Reposição de prateleira;2;5,033;5,888;1,423;14
+Campina;Reposição de prateleira;3;5,033;5,888;1,423;14
+Campina;Reposição de prateleira;4;5,033;5,888;1,423;14
+Campina;Reposição de prateleira;5;5,683;5,888;1,423;14
+Campina;Reposição de prateleira;6;5,683;5,888;1,423;14
+Campina;Reposição de prateleira;7;5,683;5,888;1,423;14
+Campina;Reposição de prateleira;8;5,217;5,888;1,423;14
+Campina;Reposição de prateleira;9;5,217;5,888;1,423;14
+Campina;Reposição de prateleira;10;6,767;5,888;1,423;14
+Campina;Reposição de prateleira;11;6,35;5,888;1,423;14
+Campina;Reposição de prateleira;12;4,967;5,888;1,423;14
+Campina;Reposição de prateleira;13;10,4;5,888;1,423;14
+Campina;Reposição de prateleira;14;6,333;5,888;1,423;14
+Campina;Abertura e acompanhamento de chamado;1;20;20;0;1
+Campina;Criação de conteúdo;1;120;120;0;1
+Campina;elaboração de calendário do ciclo e divulgação;1;120;120;0;1
+Campina;Encontro de ciclo;1;330;166;231,931;2
+Campina;Encontro de ciclo;2;2;166;231,931;2
+Campina;Eventos para os revendedores;1;360;360;0;1
+Campina;Produção de flyer ;1;20;20;0;1
+Campina;Mudança de planograma ;1;120;120;0;1
+Campina;Fechamento de caixa;1;180;180;0;1
+Campina;Mudança de vitrine;1;60;60;0;1
+Campina;Atualização de cadastro de revendedor ;1;36,15;36,15;0;1
+Campina;Cadastro de revendedor ;1;19;18,042;1,355;2
+Campina;Cadastro de revendedor ;2;17,083;18,042;1,355;2
+Campina;Faturamente de pedido (retirada e delivery);1;7,083;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);2;5,367;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);3;5,167;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);4;3,317;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);5;4,433;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);6;4,983;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);7;3,75;7,833;8,455;8
+Campina;Faturamente de pedido (retirada e delivery);8;28,567;7,833;8,455;8
+Campina;Separação de mercadoria (on-line e retirada);1;15,083;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);2;14,467;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);3;13,1;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);4;8,233;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);5;7,933;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);6;6,85;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);7;3,217;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);8;1,483;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);9;14,567;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);10;15,5;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);11;4,833;9,647;4,934;12
+Campina;Separação de mercadoria (on-line e retirada);12;10,5;9,647;4,934;12
+Campina;Venda em caixa;1;10,283;14,718;11,814;19
+Campina;Venda em caixa;2;9,083;14,718;11,814;19
+Campina;Venda em caixa;3;8,4;14,718;11,814;19
+Campina;Venda em caixa;4;7,517;14,718;11,814;19
+Campina;Venda em caixa;5;6,217;14,718;11,814;19
+Campina;Venda em caixa;6;6,15;14,718;11,814;19
+Campina;Venda em caixa;7;14,25;14,718;11,814;19
+Campina;Venda em caixa;8;3,333;14,718;11,814;19
+Campina;Venda em caixa;9;11,5;14,718;11,814;19
+Campina;Venda em caixa;10;14,567;14,718;11,814;19
+Campina;Venda em caixa;11;29,667;14,718;11,814;19
+Campina;Venda em caixa;12;15,8;14,718;11,814;19
+Campina;Venda em caixa;13;49,417;14,718;11,814;19
+Campina;Venda em caixa;14;33,083;14,718;11,814;19
+Campina;Venda em caixa;15;16,05;14,718;11,814;19
+Campina;Venda em caixa;16;24,5;14,718;11,814;19
+Campina;Venda em caixa;17;10,167;14,718;11,814;19
+Campina;Venda em caixa;18;3,5;14,718;11,814;19
+Campina;Venda em caixa;19;6,167;14,718;11,814;19
+Campina;Atendimento ao cliente ;1;7,483;3,31;1,977;10
+Campina;Atendimento ao cliente ;2;4,567;3,31;1,977;10
+Campina;Atendimento ao cliente ;3;5,067;3,31;1,977;10
+Campina;Atendimento ao cliente ;4;2,667;3,31;1,977;10
+Campina;Atendimento ao cliente ;5;2,8;3,31;1,977;10
+Campina;Atendimento ao cliente ;6;2,083;3,31;1,977;10
+Campina;Atendimento ao cliente ;7;2,1;3,31;1,977;10
+Campina;Atendimento ao cliente ;8;0,667;3,31;1,977;10
+Campina;Atendimento ao cliente ;9;1,833;3,31;1,977;10
+Campina;Atendimento ao cliente ;10;3,833;3,31;1,977;10
+Goianinha;Reposição de prateleira;1;4,883;3,506;1,722;9
+Goianinha;Reposição de prateleira;2;4,183;3,506;1,722;9
+Goianinha;Reposição de prateleira;3;6,167;3,506;1,722;9
+Goianinha;Reposição de prateleira;4;1,433;3,506;1,722;9
+Goianinha;Reposição de prateleira;5;4,783;3,506;1,722;9
+Goianinha;Reposição de prateleira;6;1,217;3,506;1,722;9
+Goianinha;Reposição de prateleira;7;2,133;3,506;1,722;9
+Goianinha;Reposição de prateleira;8;2,6;3,506;1,722;9
+Goianinha;Reposição de prateleira;9;4,15;3,506;1,722;9
+Goianinha;Abertura e acompanhamento de chamado;1;10;10;0;1
+Goianinha;Criação de conteúdo;1;20;20;0;1
+Goianinha;elaboração de calendário do ciclo e divulgação;1;15;15;0;1
+Goianinha;Encontro de ciclo;1;210;210;0;1
+Goianinha;Eventos para os revendedores;1;480;480;0;1
+Goianinha;Limpeza da ER ;1;15;15;0;1
+Goianinha;Limpeza das salas e Copa;1;60;60;0;1
+Goianinha;Limpeza dos banheiros ;1;20;20;0;1
+Goianinha;Produção de flyer ;1;10;10;0;1
+Goianinha;Mudança de planograma ;1;480;480;0;1
+Goianinha;Separação de mercadoria (on-line e retirada);1;8,15;8,15;0;1
+Goianinha;Venda em caixa;1;25,733;14,588;9,964;12
+Goianinha;Venda em caixa;2;6,883;14,588;9,964;12
+Goianinha;Venda em caixa;3;6,467;14,588;9,964;12
+Goianinha;Venda em caixa;4;9,6;14,588;9,964;12
+Goianinha;Venda em caixa;5;9,5;14,588;9,964;12
+Goianinha;Venda em caixa;6;10;14,588;9,964;12
+Goianinha;Venda em caixa;7;18,55;14,588;9,964;12
+Goianinha;Venda em caixa;8;10,283;14,588;9,964;12
+Goianinha;Venda em caixa;9;9,533;14,588;9,964;12
+Goianinha;Venda em caixa;10;19,9;14,588;9,964;12
+Goianinha;Venda em caixa;11;8,583;14,588;9,964;12
+Goianinha;Venda em caixa;12;40,017;14,588;9,964;12
+Goianinha;Atendimento ao cliente ;1;8,2;6,558;3,373;4
+Goianinha;Atendimento ao cliente ;2;8,2;6,558;3,373;4
+Goianinha;Atendimento ao cliente ;3;8,333;6,558;3,373;4
+Goianinha;Atendimento ao cliente ;4;1,5;6,558;3,373;4
+Mossoró;Devolução;1;4,267;4,058;1,462;4
+Mossoró;Devolução;2;4,267;4,058;1,462;4
+Mossoró;Devolução;3;5,617;4,058;1,462;4
+Mossoró;Devolução;4;2,083;4,058;1,462;4
+Mossoró;Reposição de prateleira;1;4,9;4,229;2,798;8
+Mossoró;Reposição de prateleira;2;4,117;4,229;2,798;8
+Mossoró;Reposição de prateleira;3;4,25;4,229;2,798;8
+Mossoró;Reposição de prateleira;4;1,8;4,229;2,798;8
+Mossoró;Reposição de prateleira;5;10,45;4,229;2,798;8
+Mossoró;Reposição de prateleira;6;4,25;4,229;2,798;8
+Mossoró;Reposição de prateleira;7;2,267;4,229;2,798;8
+Mossoró;Reposição de prateleira;8;1,8;4,229;2,798;8
+Mossoró;Mudança de planograma ;1;12,067;33,623;19,686;5
+Mossoró;Mudança de planograma ;2;12,05;33,623;19,686;5
+Mossoró;Mudança de planograma ;3;48;33,623;19,686;5
+Mossoró;Mudança de planograma ;4;48;33,623;19,686;5
+Mossoró;Mudança de planograma ;5;48;33,623;19,686;5
+Mossoró;Abertura e acompanhamento de chamado;1;20;20;0;1
+Mossoró;Criação de conteúdo;1;45;45;0;1
+Mossoró;elaboração de calendário do ciclo e divulgação;1;210;210;0;1
+Mossoró;Encontro de ciclo;1;600;600;0;1
+Mossoró;Fechamento de caixa;1;60;60;0;1
+Mossoró;Mudança de vitrine;1;10;10;0;1
+Mossoró;Cadastro de revendedor ;1;9,033;9,033;0;1
+Mossoró;Faturamente de pedido (retirada e delivery);1;7,483;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);2;4,15;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);3;3,35;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);4;6,35;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);5;11,433;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);6;5,8;6,245;2,666;7
+Mossoró;Faturamente de pedido (retirada e delivery);7;5,15;6,245;2,666;7
+Mossoró;Separação de mercadoria (on-line e retirada);1;5,683;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);2;5,417;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);3;5,133;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);4;5,083;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);5;3,667;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);6;3,533;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);7;3,5;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);8;3,1;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);9;2,883;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);10;2,533;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);11;13,25;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);12;4,233;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);13;4,083;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);14;3,833;4,536;2,633;15
+Mossoró;Separação de mercadoria (on-line e retirada);15;2,1;4,536;2,633;15
+Mossoró;Venda em caixa;1;36,983;22,114;7,676;14
+Mossoró;Venda em caixa;2;34,083;22,114;7,676;14
+Mossoró;Venda em caixa;3;30,633;22,114;7,676;14
+Mossoró;Venda em caixa;4;24,267;22,114;7,676;14
+Mossoró;Venda em caixa;5;22,417;22,114;7,676;14
+Mossoró;Venda em caixa;6;22,383;22,114;7,676;14
+Mossoró;Venda em caixa;7;22,25;22,114;7,676;14
+Mossoró;Venda em caixa;8;22,133;22,114;7,676;14
+Mossoró;Venda em caixa;9;21,483;22,114;7,676;14
+Mossoró;Venda em caixa;10;17,617;22,114;7,676;14
+Mossoró;Venda em caixa;11;17,167;22,114;7,676;14
+Mossoró;Venda em caixa;12;14,933;22,114;7,676;14
+Mossoró;Venda em caixa;13;13,567;22,114;7,676;14
+Mossoró;Venda em caixa;14;9,683;22,114;7,676;14
+Mossoró;Atendimento ao cliente ;1;2,6;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;2;2,117;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;3;1,033;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;4;1,85;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;5;0,917;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;6;0,667;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;7;1,117;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;8;2,567;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;9;5,55;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;10;1,367;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;11;1,8;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;12;2,367;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;13;0,833;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;14;2,7;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;15;1,683;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;16;1,8;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;17;3,217;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;18;7,417;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;19;4,567;2,782;2,311;20
+Mossoró;Atendimento ao cliente ;20;9,467;2,782;2,311;20
+Mossoró;Ativações on-line;1;22;22;0;1
+Paracuru;Devolução;1;15,217;15,217;0;1
+Paracuru;Criação de conteúdo;1;60;60;0;1
+Paracuru;Eventos para os revendedores;1;240;240;0;1
+Paracuru;Limpeza da ER ;1;15;15;0;1
+Paracuru;Limpeza dos banheiros ;1;20;20;0;1
+Paracuru;Mudança de planograma ;1;240;240;0;1
+Paracuru;Separação de mercadoria (on-line e retirada);1;5,933;5,906;0,559;3
+Paracuru;Separação de mercadoria (on-line e retirada);2;6,45;5,906;0,559;3
+Paracuru;Separação de mercadoria (on-line e retirada);3;5,333;5,906;0,559;3
+Paracuru;Venda em caixa;1;15,567;15,567;0;1
+Paracuru;Atendimento ao cliente ;1;1,95;2,875;1,308;2
+Paracuru;Atendimento ao cliente ;2;3,8;2,875;1,308;2
+Paraipaba;Criação de conteúdo;1;30;30;0;1
+Paraipaba;Encontro de ciclo;1;180;180;0;1
+Paraipaba;Limpeza da ER ;1;20;20;0;1
+Paraipaba;Limpeza dos banheiros ;1;25;25;0;1
+Paraipaba;Faturamente de pedido (retirada e delivery);1;8,633;8,633;0;1
+Paraipaba;Venda em caixa;1;6,367;7,858;2,11;2
+Paraipaba;Venda em caixa;2;9,35;7,858;2,11;2
+Paraipaba;Atendimento ao cliente ;1;19,2;13,011;6,779;3
+Paraipaba;Atendimento ao cliente ;2;14,067;13,011;6,779;3
+Paraipaba;Atendimento ao cliente ;3;5,767;13,011;6,779;3
+Trairi;Eventos para os revendedores;1;30;30;0;1
+Trairi;Limpeza da ER ;1;10;10;0;1
+Trairi;Limpeza dos banheiros ;1;5;5;0;1
+Trairi;Venda em caixa;1;12,65;8,642;5,669;2
+Trairi;Venda em caixa;2;4,633;8,642;5,669;2
+Trairi;Atendimento ao cliente ;1;28,35;12,823;10,054;5
+Trairi;Atendimento ao cliente ;2;15,683;12,823;10,054;5
+Trairi;Atendimento ao cliente ;3;10,317;12,823;10,054;5
+Trairi;Atendimento ao cliente ;4;8,25;12,823;10,054;5
+Trairi;Atendimento ao cliente ;5;1,517;12,823;10,054;5
+Pentecoste;Reposição de prateleira;1;1,4;1,4;0;1
+Pentecoste;Faturamente de pedido (retirada e delivery);1;4,383;3,989;0,612;3
+Pentecoste;Faturamente de pedido (retirada e delivery);2;4,3;3,989;0,612;3
+Pentecoste;Faturamente de pedido (retirada e delivery);3;3,283;3,989;0,612;3
+Pentecoste;Venda em caixa;1;8,417;6,967;2,051;2
+Pentecoste;Venda em caixa;2;5,517;6,967;2,051;2
+Pentecoste;Atendimento ao cliente ;1;30,3;12,622;15,31;3
+Pentecoste;Atendimento ao cliente ;2;3,883;12,622;15,31;3
+Pentecoste;Atendimento ao cliente ;3;3,683;12,622;15,31;3
