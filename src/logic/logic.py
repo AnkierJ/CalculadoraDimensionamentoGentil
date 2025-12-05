@@ -1342,11 +1342,11 @@ def train_auxiliares_model(
 
         def _fit_cat_model(loss: str) -> CatBoostRegressor:
             model_cb = CatBoostRegressor(
-                depth=8,
-                learning_rate=0.03,
-                n_estimators=1300,
-                subsample=0.85,
-                l2_leaf_reg=3.0,
+                depth=6,
+                learning_rate=0.05,
+                n_estimators=800,
+                subsample=0.9,
+                l2_leaf_reg=5.0,
                 loss_function=loss,
                 random_seed=42,
                 verbose=False,
@@ -1361,8 +1361,8 @@ def train_auxiliares_model(
             return model_cb
 
         model_mid = _fit_cat_model("RMSE")
-        model_low = _fit_cat_model("Quantile:alpha=0.05")
-        model_high = _fit_cat_model("Quantile:alpha=0.95")
+        model_low = _fit_cat_model("Quantile:alpha=0.01")
+        model_high = _fit_cat_model("Quantile:alpha=0.99")
         wrapper = CatBoostQuantileModel(
             model_mid=model_mid,
             model_low=model_low,
@@ -1950,7 +1950,7 @@ def predict_with_uncertainty(
     margem: float = 0.15,
     algo: str = "xgboost",
 ) -> Dict[str, float]:
-    """Aplica bootstrap (XGBoost) ou quantile regression (CatBoost) para estimar o IC de 90% pré-fila."""
+    """Aplica bootstrap (XGBoost) ou quantile regression (CatBoost) para estimar o IC de 98% pré-fila."""
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
@@ -1985,7 +1985,7 @@ def predict_with_uncertainty(
             "pred_mean": mid_val,
             "ci_low": low_val,
             "ci_high": high_val,
-            "ci_label": "Int. 90% (CatBoost pré-fila)",
+            "ci_label": "Int. 98% (CatBoost pré-fila)",
             "ci_low_disp": float(low_disp),
             "ci_high_disp": float(high_disp),
             "ci_mid_disp": float(mid_disp),
@@ -2486,7 +2486,16 @@ def _format_interval_value(val: Optional[float]) -> str:
     if val is None or (isinstance(val, float) and not math.isfinite(val)):
         return "-"
     try:
-        return f"{float(val):.2f}"
+        num = float(val)
+        # Usa até 4 casas para evitar truncar intervalos estreitos; garante pelo menos 2
+        txt = f"{num:.4f}".rstrip("0").rstrip(".")
+        if "." not in txt:
+            txt = f"{txt}.00"
+        else:
+            dec = len(txt.split(".")[1])
+            if dec < 2:
+                txt = f"{txt}{'0' * (2 - dec)}"
+        return txt
     except (TypeError, ValueError):
         return str(val)
 
@@ -2782,8 +2791,6 @@ def calcular_intervalos_modelos(
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
     for key in algo_keys:
-        if key == "catboost":
-            continue  # evita re-treinos demorados do CatBoost só para IC
         ci = predict_with_uncertainty(
             train_df,
             features_input,
