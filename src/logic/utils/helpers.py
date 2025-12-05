@@ -174,9 +174,9 @@ def get_schema_dAmostras() -> Dict[str, str]:
         "Processo": "string",
         "Amostra": "int",
         "Minutos": "float",
-        "Tempo MǸdio": "float",
+        "Tempo Médio": "float",
         "Desvio": "float",
-        "Nǧmero de Amostras": "int",
+        "Número de Amostras": "int",
     }
 
 

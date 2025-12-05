@@ -1343,7 +1343,7 @@ def ideal_simplificado_por_fluxo(
 # =============================================================================
 # Carga e leitura de dados
 # =============================================================================
-def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
+def load_csv_path(path: str, schema: Dict[str, str], aliases: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     # Carrega CSV com tentativa explícita de encodings e delimitadores
     if not os.path.exists(path):
         return create_empty_from_schema(schema)
@@ -1388,9 +1388,25 @@ def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
                 break
             except Exception:
                 continue
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    if aliases:
+        df = df.rename(columns={col: aliases.get(col, col) for col in df.columns})
     df = _coerce_types(df, schema)
     return df
+AMOSTRAS_COL_ALIASES: Dict[str, str] = {
+    "Tempo M�dio": "Tempo Médio",
+    "Tempo MǸdio": "Tempo Médio",
+    "Tempo Medio": "Tempo Médio",
+    "Tempo medio": "Tempo Médio",
+    "N�mero de Amostras": "Número de Amostras",
+    "Nǧmero de Amostras": "Número de Amostras",
+    "Numero de Amostras": "Número de Amostras",
+    "\ufeffLoja": "Loja",
+    "Loja": "Loja",
+}
+ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
+    "dAmostras": AMOSTRAS_COL_ALIASES,
+}
 @st.cache_data(show_spinner=False)    
 def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.DataFrame:
     # mapa de nomes → factories de schema
@@ -1403,7 +1419,8 @@ def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.Dat
         "fIndicadores": get_schema_fIndicadores,
     }
     schema_fn = schema_map[schema_name]
-    return load_csv_path(path, schema_fn())
+    aliases = ALIASES_BY_SCHEMA.get(schema_name, {})
+    return load_csv_path(path, schema_fn(), aliases)
 def _load_with_version(path: str, schema_name: str) -> pd.DataFrame:
     """Empacota a leitura do CSV usando o mtime como chave de cache."""
     file_path = Path(path)
