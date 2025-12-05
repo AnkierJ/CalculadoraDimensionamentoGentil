@@ -773,9 +773,13 @@ def make_target(train_df: pd.DataFrame,
     # Se no futuro você criar uma coluna de carga por loja (ex: CargaTeoricaHoras),
     # ela entra aqui. Por enquanto, deixa preparado:
     y_ideal = pd.Series(np.nan, index=train_df.index, dtype="float64")
+    carga_semana = pd.Series(np.nan, index=train_df.index, dtype="float64")
     if "CargaTeoricaHoras" in train_df.columns:
-        carga = pd.to_numeric(train_df["CargaTeoricaHoras"], errors="coerce")
-        y_ideal = (carga / horas_disp) * (1.0 + margem)
+        carga_semana = pd.to_numeric(train_df["CargaTeoricaHoras"], errors="coerce")
+    if carga_semana.isna().all():
+        carga_semana = pd.to_numeric(train_df["QtdAux"], errors="coerce") * float(horas_disp)
+    horas_disp_safe = max(float(horas_disp), 1e-6)
+    y_ideal = (carga_semana / horas_disp_safe) * (1.0 + margem)
     y_final = y_ideal.fillna(y_hist)
     receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
     receita_por_aux = receita_por_aux.replace([np.inf, -np.inf], np.nan)
@@ -1361,14 +1365,12 @@ def ideal_simplificado_por_fluxo(
 # Carga e leitura de dados
 # =============================================================================
 def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
-    # Carrega CSV com tentativas de codificação/sep e normaliza colunas
-    """Carrega um CSV local testando encodings e delimitadores diferentes."""
+    # Carrega CSV com tentativa explícita de encodings e delimitadores
     if not os.path.exists(path):
         return create_empty_from_schema(schema)
-    # Tenta detectar delimitador
     detected_sep = None
     try:
-        with open(path, 'r', encoding='utf-8-sig', errors='ignore') as fh:
+        with open(path, "r", encoding="utf-8-sig", errors="ignore") as fh:
             sample = fh.read(2048)
             try:
                 detected_sep = csv.Sniffer().sniff(sample).delimiter
@@ -1377,27 +1379,36 @@ def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
     except Exception:
         detected_sep = None
     sep_kwargs = {"sep": detected_sep or ","}
-    try:
-        df = pd.read_csv(path, encoding="utf-8-sig", decimal=",", true_values=["VERDADEIRO","SIM","True","1"], false_values=["FALSO","NAO","NÃO","False","0"], **sep_kwargs)
-    except UnicodeDecodeError:
+    encodings_to_try = ["utf-8-sig", "utf-8", "latin-1"]
+    df = None
+    for enc in encodings_to_try:
         try:
-            df = pd.read_csv(path, encoding="latin-1", decimal=",", true_values=["VERDADEIRO","SIM","True","1"], false_values=["FALSO","NAO","NÃO","False","0"], **sep_kwargs)
+            df = pd.read_csv(
+                path,
+                encoding=enc,
+                decimal=",",
+                true_values=["VERDADEIRO", "SIM", "True", "1"],
+                false_values=["FALSO", "NAO", "NÃO", "False", "0"],
+                **sep_kwargs,
+            )
+            break
+        except UnicodeDecodeError:
+            continue
         except Exception:
-            return create_empty_from_schema(schema)
-    except Exception:
+            continue
+    if df is None:
         try:
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, sep=sep_kwargs["sep"])
         except Exception:
             return create_empty_from_schema(schema)
     if df.shape[1] == 1:
-        # Provável erro de separador; tenta ; explicitamente
-        try:
-            df = pd.read_csv(path, sep=";", encoding="utf-8-sig", decimal=",")
-        except Exception:
+        # Provável erro de separador; tenta ; explicitamente com os encodings definidos
+        for enc in encodings_to_try:
             try:
-                df = pd.read_csv(path, sep=";", encoding="latin-1", decimal=",")
+                df = pd.read_csv(path, sep=";", encoding=enc, decimal=",")
+                break
             except Exception:
-                pass
+                continue
     df.columns = [str(c).strip() for c in df.columns]
     df = _coerce_types(df, schema)
     return df

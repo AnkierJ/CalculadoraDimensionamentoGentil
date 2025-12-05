@@ -73,69 +73,20 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         total_base_ref = total_refs.get("BaseTotal", total_refs.get("Base", 0.0))
         total_receita_ref = total_refs.get("ReceitaTotalMes", 0.0)
 
-        # Informar dados de base
-        if modo_calc:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                horas_disp_input = st.number_input(
-                    "Horas contratuais (h/sem)",
-                    min_value=5.0,
-                    value=44.0,
-                    step=1.0,
-                    format="%.1f",
-                    help="Carga semanal prevista em contrato para cada auxiliar, antes de qualquer perda operacional.",
-                )
-                horas_disp = float(horas_disp_input)
-                if horas_disp_input > 200:
-                    horas_disp = horas_disp_input / 4.33
-                    st.caption(f"Valor informado parece mensal. Convertido para {horas_disp:.1f} h/semana.")
-                horas_loja_config_raw = safe_float(
-                    st.session_state.get("horas_operacionais_form", st.session_state.get("horas_loja_config", 60.0)),
-                    60.0,
-                )
-                horas_loja_config = horas_loja_config_raw
-            with col2:
-                absenteismo = st.number_input(
-                    "Absenteísmo (0–1)",
-                    min_value=0.00,
-                    max_value=0.30,
-                    value=float(DEFAULT_ABSENTEISMO),
-                    step=0.01,
-                    format="%.2f",
-                    help="Percentual médio perdido com faltas, férias e treinamentos. Será abatido das horas contratuais.",
-                )
-            with col3:
-                folga_operacional = st.number_input(
-                    "Folga operacional (0–1)",
-                    min_value=0.00,
-                    max_value=0.50,
-                    value=0.15,
-                    step=0.01,
-                    format="%.2f",
-                    help="Percentual único que cobre monotonia, picos/SLA e margem tática. Quanto maior, mais folga no dimensionamento.",
-                )
-            dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
-            dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
-            if horas_loja_config <= 24:
-                horas_loja_config = horas_loja_config * dias_operacionais_semana
 
-            st.session_state["horas_disp_semanais"] = horas_disp
-            st.session_state["horas_loja_config"] = horas_loja_config
-            st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
-        else:
-            horas_disp = 44.0
-            horas_loja_config = float(st.session_state.get("horas_loja_config", 60.0))
-            absenteismo = float(DEFAULT_ABSENTEISMO)
-            folga_operacional = 0.15
+        def _compute_absenteismo_prefill(row_dict: Dict[str, object]) -> float:
+            if not row_dict:
+                return float(DEFAULT_ABSENTEISMO)
+            disp_lookup = safe_float(get_lookup(row_dict, "%disp"), 0.0)
+            absent_lookup = safe_float(get_lookup(row_dict, "%absent"), 0.0)
+            if absent_lookup > 0:
+                abs_val = absent_lookup if absent_lookup <= 1 else absent_lookup / 100.0
+                return max(0.0, min(1.0, abs_val))
+            if disp_lookup > 0:
+                disp_val = disp_lookup if disp_lookup <= 1 else disp_lookup / 100.0
+                return max(0.0, min(1.0, 1.0 - disp_val))
+            return float(DEFAULT_ABSENTEISMO)
 
-        dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
-        dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
-        st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
-
-        ocupacao_alvo = float(DEFAULT_OCUPACAO_ALVO)
-        fator_monotonia = 1.0 + folga_operacional if modo_calc else 1.0 + folga_operacional
-        margem = folga_operacional
-        sla_buffer = folga_operacional
 
         # Pesquisa de loja
         st.markdown("**Pesquisar loja existente (opcional)**")
@@ -151,6 +102,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
         df_ind = st.session_state.get("fIndicadores")
         df_estrutura = st.session_state.get("dEstrutura")
+        df_pessoas = st.session_state.get("dPessoas")
         if lookup_field in ("BCPS", "SAP"):
             with col_lookup[1]:
                 lookup_code = st.text_input("", placeholder=(f"Código ({lookup_field})"), key="lookup_code", label_visibility="collapsed")
@@ -195,6 +147,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     indicator_row = matches.iloc[0].to_dict() if not matches.empty else {}
                     estrutura_row: Dict[str, object] = {}
                     estrutura_used = False
+                    pessoas_row: Dict[str, object] = {}
+                    pessoas_used = False
                     if df_estrutura is not None and not df_estrutura.empty:
                         nome_ref = indicator_row.get("Loja") if indicator_row else lookup_code
                         estrutura_row, estrutura_ok = _get_loja_row(df_estrutura, nome_ref)
@@ -209,16 +163,25 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                                     break
                         if not estrutura_used:
                             estrutura_row = {}
+                    if df_pessoas is not None and not df_pessoas.empty:
+                        nome_ref = indicator_row.get("Loja") if indicator_row else lookup_code
+                        pessoas_row, pessoas_ok = _get_loja_row(df_pessoas, nome_ref)
+                        if not pessoas_ok and lookup_field == "Loja":
+                            pessoas_row, pessoas_ok = _get_loja_row(df_pessoas, lookup_code)
+                        pessoas_used = bool(pessoas_row)
 
                     combined: Dict[str, object] = {}
                     if estrutura_row:
                         combined.update(estrutura_row)
                     if indicator_row:
                         combined.update(indicator_row)
+                    if pessoas_row:
+                        combined.update(pessoas_row)
 
                     if combined:
                         st.session_state["lookup_found"] = True
                         st.session_state["lookup_row"] = _standardize_row(combined)
+                        st.session_state["absenteismo_input"] = _compute_absenteismo_prefill(st.session_state.get("lookup_row", {}))
                         apply_operacional_defaults_from_lookup(st.session_state["lookup_row"])
                         loja_nome = str(combined.get("Loja", lookup_code)).strip()
                         fontes = []
@@ -236,6 +199,75 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         if st.session_state.get("lookup_found") and st.session_state.get("lookup_row"):
             loja_nome = str(st.session_state["lookup_row"].get("Loja", "")).strip()
             st.info(f"Usando indicadores da loja: **{loja_nome}**")
+
+        # Informar dados de base
+        if modo_calc:
+            lookup_prefill = st.session_state.get("lookup_row") or {}
+            absenteismo_prefill = _compute_absenteismo_prefill(lookup_prefill)
+            if "absenteismo_input" not in st.session_state:
+                st.session_state["absenteismo_input"] = absenteismo_prefill
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                horas_disp_input = st.number_input(
+                    "Horas contratuais (h/sem)",
+                    min_value=5.0,
+                    value=44.0,
+                    step=1.0,
+                    format="%.1f",
+                    help="Carga semanal prevista em contrato para cada auxiliar, antes de qualquer perda operacional.",
+                )
+                horas_disp = float(horas_disp_input)
+                if horas_disp_input > 200:
+                    horas_disp = horas_disp_input / 4.33
+                    st.caption(f"Valor informado parece mensal. Convertido para {horas_disp:.1f} h/semana.")
+                horas_loja_config_raw = safe_float(
+                    st.session_state.get("horas_operacionais_form", st.session_state.get("horas_loja_config", 60.0)),
+                    60.0,
+                )
+                horas_loja_config = horas_loja_config_raw
+            with col2:
+                absenteismo = st.number_input(
+                    "Absenteísmo (0–1)",
+                    min_value=0.00,
+                    max_value=0.30,
+                    step=0.01,
+                    format="%.2f",
+                    help="Percentual médio perdido com faltas, férias e treinamentos. Será abatido das horas contratuais.",
+                    key="absenteismo_input",
+                )
+            folga_base = 0.15
+            with col3:
+                folga_operacional = st.number_input(
+                    "Folga operacional (0–1)",
+                    min_value=0.00,
+                    max_value=0.50,
+                    value=folga_base,
+                    step=0.01,
+                    format="%.2f",
+                    help="Percentual único que cobre monotonia, picos/SLA e margem tática. Quanto maior, mais folga no dimensionamento.",
+                )
+            dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
+            dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
+            if horas_loja_config <= 24:
+                horas_loja_config = horas_loja_config * dias_operacionais_semana
+
+            st.session_state["horas_disp_semanais"] = horas_disp
+            st.session_state["horas_loja_config"] = horas_loja_config
+            st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+        else:
+            horas_disp = 44.0
+            horas_loja_config = float(st.session_state.get("horas_loja_config", 60.0))
+            absenteismo = float(DEFAULT_ABSENTEISMO)
+            folga_operacional = 0.15
+
+        dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
+        dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
+        st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+
+        ocupacao_alvo = float(DEFAULT_OCUPACAO_ALVO)
+        fator_monotonia = 1.0 + folga_operacional if modo_calc else 1.0 + folga_operacional
+        margem = folga_operacional
+        sla_buffer = folga_operacional
 
         # Dados da loja até features_input
         lookup_row = st.session_state.get("lookup_row")
@@ -678,9 +710,29 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 mape_v = metrics_info.get("MAPE")
                 warnings_info = metrics_info.get("warnings")
                 queue_diag = res.get("queue_diag")
+                pred_raw = float(res.get("pred") or 0.0)
+                def _ajustar_pred(pred_val: float) -> tuple[float, Dict[str, float]]:
+                    # Ajusta somente a diferença em relação ao baseline (absenteísmo/folga pré-preenchidos).
+                    base_abs = float(absenteismo_prefill)
+                    base_folga = float(folga_base)
+                    fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
+                    fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
+                    ajuste_total = fator_abs * fator_folga
+                    return pred_val * ajuste_total, {
+                        "fator_abs": fator_abs,
+                        "fator_folga": fator_folga,
+                        "ajuste_total": ajuste_total,
+                    }
+                pred_ajust, adj_debug = _ajustar_pred(pred_raw)
+                res["pred_ajust"] = pred_ajust
+                res["ajuste_debug"] = adj_debug
                 with col:
-                    st.metric(res["label"], f"{res['pred_display']:.2f} aux")
+                    st.metric(res["label"], f"{pred_ajust:.2f} aux")
                     caption_lines: List[str] = []
+                    caption_lines.append(
+                        f"Bruto: {pred_raw:.2f} | ajuste x{adj_debug['ajuste_total']:.2f} "
+                        f"(abs {adj_debug['fator_abs']:.2f}, folga {adj_debug['fator_folga']:.2f})"
+                    )
                     if _metric_has_value(precisao):
                         caption_lines.append(f"Precisão: {precisao:.1f}%")
                     if _metric_has_value(r2m):
@@ -805,9 +857,28 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     mape_v = metrics_info.get("MAPE")
                     warnings_info = metrics_info.get("warnings")
                     queue_diag = res.get("queue_diag")
+                    pred_raw = float(res.get("pred") or 0.0)
+                    def _ajustar_pred_ideal(pred_val: float) -> tuple[float, Dict[str, float]]:
+                        base_abs = float(absenteismo_prefill)
+                        base_folga = float(folga_base)
+                        fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
+                        fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
+                        ajuste_total = fator_abs * fator_folga
+                        return pred_val * ajuste_total, {
+                            "fator_abs": fator_abs,
+                            "fator_folga": fator_folga,
+                            "ajuste_total": ajuste_total,
+                        }
+                    pred_ajust, adj_debug = _ajustar_pred_ideal(pred_raw)
+                    res["pred_ajust"] = pred_ajust
+                    res["ajuste_debug"] = adj_debug
                     with col:
-                        st.metric(res["label"], f"{res['pred_display']:.2f} aux")
+                        st.metric(res["label"], f"{pred_ajust:.2f} aux")
                         caption_lines: List[str] = []
+                        caption_lines.append(
+                            f"Bruto: {pred_raw:.2f} | ajuste x{adj_debug['ajuste_total']:.2f} "
+                            f"(abs {adj_debug['fator_abs']:.2f}, folga {adj_debug['fator_folga']:.2f})"
+                        )
                         if _metric_has_value(precisao):
                             caption_lines.append(f"Precisão: {precisao:.1f}%")
                         if _metric_has_value(r2m):

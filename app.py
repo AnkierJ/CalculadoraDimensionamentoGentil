@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 from pathlib import Path
 
 from src.logic.core.logic import _load_with_version
@@ -9,9 +9,8 @@ from src.views.diagnostics_view import render_diag_cache
 from src.views.fila_view import render_fila_tab
 from src.views.layout import inject_global_styles, render_header, render_tutorial, set_page_config
 
-
-DATA_DIR = Path(r"C:\Users\ankier.lima\Gentil Negócios\File server-GN - Comercial\Comercial 360\01. Dimensionamento do Time de Venda Direta\03. Calculadora")
-
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
 
 # Carregamento inicial dos datasets em session_state
 if "dAmostras" not in st.session_state:

@@ -190,7 +190,8 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
                 elif freq_periodo == "por mês":
                     freq_semana = freq_val / WEEKS_PER_MONTH
                 lambda_proc = freq_semana / max(horas_semana_oper, 1e-6)
-                carga_horas_semana = (freq_semana * tempo_val) / 60.0
+                carga_semana_min = freq_semana * tempo_val
+                carga_semana_horas = carga_semana_min / 60.0
                 processos_resultados.append(
                     {
                         "Processo": proc_nome,
@@ -198,7 +199,8 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
                         "freq_informada": freq_val,
                         "freq_semana": freq_semana,
                         "lambda_hora": lambda_proc,
-                        "carga_horas_semana": carga_horas_semana,
+                        "carga_semana_min": carga_semana_min,
+                        "carga_semana_horas": carga_semana_horas,
                     }
                 )
 
@@ -250,16 +252,30 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
         if ativos:
             df_proc = pd.DataFrame(ativos)
             df_proc["freq_dia"] = df_proc["freq_semana"] / max(dias_oper, 1)
+            df_proc["carga_semana_horas"] = df_proc["carga_semana_min"] / 60.0
+            freq_informada_label = f"Freq. informada ({freq_label})"
+            df_proc = df_proc.rename(
+                columns={
+                    "tempo_min": "Tempo (min)",
+                    "freq_informada": freq_informada_label,
+                    "freq_semana": "Freq. semana",
+                    "freq_dia": "Freq. dia",
+                    "lambda_hora": "Lambda (h)",
+                    "carga_semana_min": "Carga/semana (min)",
+                    "carga_semana_horas": "Carga/semana (h)",
+                }
+            )
             st.dataframe(
                 df_proc[
                     [
                         "Processo",
-                        "tempo_min",
-                        "freq_informada",
-                        "freq_semana",
-                        "freq_dia",
-                        "lambda_hora",
-                        "carga_horas_semana",
+                        "Tempo (min)",
+                        freq_informada_label,
+                        "Freq. semana",
+                        "Freq. dia",
+                        "Lambda (h)",
+                        "Carga/semana (min)",
+                        "Carga/semana (h)",
                     ]
                 ],
                 use_container_width=True,

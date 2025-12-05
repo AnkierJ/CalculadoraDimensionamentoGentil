@@ -20,8 +20,8 @@ SYN = {
     "A0": ["A0"],
     "A1aA3": ["A1aA3", "A1 a A3", "A1_A3"],
     "I4aI6": ["I4aI6", "I4 a I6", "I4_I6"],
-    "Inicios": ["Inicios", "In��cios", "Inicios (Qtd)"],
-    "Reinicios": ["Reinicios", "Rein��cios", "Reinicios (Qtd)"],
+    "Inicios": ["Inicios", "Inícios", "Inicios (Qtd)"],
+    "Reinicios": ["Reinicios", "Reiníios", "Reinicios (Qtd)"],
     "Recuperados": ["Recuperados"],
     "%Retirada": ["%Retirada", "% Retirada", "PctRetirada"],
     "Pedidos/Hora": ["Pedidos/Hora", "Pedidos por Hora", "Pedidos_Hora"],
@@ -35,6 +35,8 @@ SYN = {
     "Copa": ["Copa"],
     "HorasOperacionais": ["HorasOperacionais", "Horas Operacionais"],
     "DiasOperacionais": ["DiasOperacionais", "Dias Operacionais", "Dias/semana"],
+    "%disp": ["%disp", "% disponibilidade", "% disponibilidade operacional"],
+    "%absent": ["%absent", "% absent", "%absenteismo"],
 }
 
 TRUE_BOOL_VALUES = {"VERDADEIRO", "SIM", "S", "TRUE", "T", "1", "YES", "Y"}
@@ -200,6 +202,7 @@ def get_schema_dPessoas() -> Dict[str, str]:
         "QtdAux": "int",
         "QtdLid": "int",
         "%disp": "float",
+        "%absent": "float",
     }
 
 
@@ -230,7 +233,7 @@ def get_schema_fIndicadores() -> Dict[str, str]:
         "BCPS": "string",
         "SAP": "string",
         "Estado": "string",
-        "Pra��a": "string",
+        "Praça": "string",
         "Loja": "string",
         "BaseTotal": "int",
         "BaseAtiva": "int",
@@ -361,4 +364,3 @@ def read_csv_with_schema(file_obj, schema: Dict[str, str]) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     df = _coerce_types(df, schema)
     return df
-
