@@ -1,406 +1,87 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import math
-import io
+from sklearn.cluster import KMeans
 import streamlit as st
-import base64
 from typing import Dict, List, Tuple, Optional, Union
 import os
 import csv
-import unicodedata
 import pandas as pd
 from pathlib import Path
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, train_test_split
 import numpy as np
 from sklearn.impute import SimpleImputer
-from sklearn.compose import ColumnTransformer
-from sklearn.metrics import (
-    r2_score,
-    mean_absolute_error,
-    mean_squared_error,
-)
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
 try:
     from statsmodels.stats.outliers_influence import variance_inflation_factor  # type: ignore
 except ImportError:
     variance_inflation_factor = None
-    
-try:
-    from catboost import CatBoostRegressor  # type: ignore
-except ImportError:
-    CatBoostRegressor = None
-
-try:
-    from xgboost import XGBRegressor  # type: ignore
-except ImportError:
-    XGBRegressor = None
-
+from ..models.model_catboost import CatBoostQuantileModel, predict_catboost, train_catboost_model
+from ..models.model_xgboost import predict_xgboost, train_xgboost_model
+from ..models.model_fila import (
+    DEFAULT_OCUPACAO_ALVO,
+    diagnosticar_fila,
+    estimate_queue_inputs,
+)
+from ..utils.helpers import (
+    FALSE_BOOL_VALUES,
+    SYN,
+    TRUE_BOOL_VALUES,
+    _coerce_types,
+    _ensure_columns,
+    _norm_code,
+    _standardize_cols,
+    _standardize_row,
+    calc_pct,
+    create_empty_from_schema,
+    get_lookup,
+    get_lookup_value,
+    get_schema_dAmostras,
+    get_schema_dEstrutura,
+    get_schema_dPessoas,
+    get_schema_fFaturamento,
+    get_schema_fIndicadores,
+    image_to_base64,
+    normalize_processo_nome,
+    read_csv_with_schema,
+    safe_float,
+    template_df,
+    to_csv_bytes,
+    validate_df,
+)
+from ..utils.metrics import (
+    mae,
+    mape_safe,
+    precision_from_mape,
+    r2,
+    rmse,
+    smape,
+    intervalo_90_bootstrap,
+    intervalo_90_catboost,
+)
+from ..data.buscaDeLojas import (
+    _ensure_loja_key,
+    _get_loja_row,
+    _filter_df_by_loja,
+    carregar_lojas,
+    listar_nomes_lojas,
+    obter_loja_por_nome,
+    filtrar_lojas,
+)
+from .features import criar_features_operacionais, criar_features_fila
+from .clusters import treinar_kmeans, atribuir_cluster
 # Parâmetros padrão para o modo IDEAL
-DEFAULT_OCUPACAO_ALVO = 0.80        # % do tempo produtivo (0–1)
 DEFAULT_ABSENTEISMO   = 0.08        # férias + faltas + treinamentos (0–1)
 DEFAULT_SLA_BUFFER    = 0.05        # folga extra p/ pico/SLA além da margem
-QUEUE_CALIBRATION_DEFAULT = 1.0     # fator base (fixo) para calibrar a carga do modelo de filas
-
 WEEKS_PER_MONTH = 4.33
-# Toggle para exibir logs detalhados da teoria das filas
-QUEUE_DEBUG = False
-
 # =============================================================================
-# Recursos visuais e normalização
+# Helpers importados de utils.helpers
 # =============================================================================
-
-def image_to_base64(path):
-    """Converte o arquivo indicado em string base64 para embutir imagens no app."""
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
-
-def _norm_code(x):
-    """Normaliza códigos removendo sufixos numéricos e caracteres não alfanuméricos."""
-    s = "" if pd.isna(x) else str(x).strip()
-    # remove .0 de floats int-like e lixo não alfanumérico
-    if s.endswith(".0"):
-        s = s[:-2]
-    s = "".join(ch for ch in s if ch.isalnum()).upper()
-    return s
-
-def normalize_processo_nome(nome: Optional[str]) -> str:
-    """Remove acentos e normaliza o identificador textual de processos."""
-    if nome is None:
-        return ""
-    norm = unicodedata.normalize("NFKD", str(nome))
-    norm = "".join(ch for ch in norm if not unicodedata.combining(ch))
-    return norm.strip().casefold()
-
-def safe_float(val, default=0.0):
-    """Converte strings com pontuação, %, ou R$ em float seguro usando um default."""
-    try:
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            return default
-        if isinstance(val, str):
-            s = val.strip()
-            # remove separador de milhar . e converte vírgula para ponto
-            s = s.replace(".", "").replace(",", ".")
-            # remove símbolos comuns
-            s = s.replace("%", "").replace("R$", "").strip()
-            if s == "":
-                return default
-            return float(s)
-        return float(val)
-    except (ValueError, TypeError):
-        return default
-
-SYN = {
-    "BaseTotal":        ["BaseTotal", "Base Total", "Base_Total", "Base"],
-    "BaseAtiva":        ["BaseAtiva", "Base Ativa", "Base_Ativa"],
-    "ReceitaTotalMes":  ["ReceitaTotalMes", "Receita Total", "Receita Total Mes", "Receita_Total_Mes"],
-    "ReaisPorAtivo":    ["ReaisPorAtivo", "Reais por Ativo", "Boleto Médio", "Boleto Medio", "Boleto_Medio"],
-    "AtividadeER":      ["AtividadeER", "Atividade ER", "Atividade_ER"],
-    "Churn":            ["Churn"],
-    "A0":               ["A0"],
-    "A1aA3":            ["A1aA3", "A1 a A3", "A1_A3"],
-    "I4aI6":            ["I4aI6", "I4 a I6", "I4_I6"],
-    "Inicios":          ["Inicios", "Inícios", "Inicios (Qtd)"],
-    "Reinicios":        ["Reinicios", "Reinícios", "Reinicios (Qtd)"],
-    "Recuperados":      ["Recuperados"],
-    "%Retirada":        ["%Retirada", "% Retirada", "PctRetirada"],
-    "Pedidos/Hora":     ["Pedidos/Hora", "Pedidos por Hora", "Pedidos_Hora"],
-    "Pedidos/Dia":      ["Pedidos/Dia", "Pedidos por Dia", "Pedidos_Dia", "Pedidos / Dia"],
-    "Itens/Pedido":     ["Itens/Pedido", "Itens por Pedido", "Itens_Pedido"],
-    "Faturamento/Hora": ["Faturamento/Hora", "Faturamento por Hora", "Faturamento_Hora"],
-    "Area Total":       ["Area Total"],
-    "Qtd Caixas":       ["Qtd Caixas", "Caixas"],
-    "Espaco Evento":    ["Espaco Evento", "Esp Conv", "Espaco_Conv"],
-    "Escritorio":       ["Escritorio"],
-    "Copa":             ["Copa"],
-    "HorasOperacionais":["HorasOperacionais", "Horas Operacionais"],
-    "DiasOperacionais":["DiasOperacionais", "Dias Operacionais", "Dias/semana"],
-}
-
-TRUE_BOOL_VALUES = {"VERDADEIRO","SIM","S","TRUE","T","1","YES","Y"}
-FALSE_BOOL_VALUES = {"FALSO","NAO","NÃO","N","FALSE","F","0","NO"}
-
-def get_lookup(row_dict, canonical_key):
-    """Busca um valor usando chaves canônicas e a tabela de sinônimos."""
-    for k in SYN.get(canonical_key, [canonical_key]):
-        if k in row_dict and row_dict[k] is not None:
-            return row_dict[k]
-    return None
-
-def get_lookup_value(primary_key, fallback_keys=None):
-    """Obtém do session_state valores numéricos com fallback de chaves."""
-    lookup_row = st.session_state.get("lookup_row")
-    keys = [primary_key]
-    if fallback_keys:
-        keys.extend(fallback_keys)
-    for key in keys:
-        val = get_lookup(lookup_row, key)
-        if val is not None:
-            return safe_float(val, 0.0)
-    return 0.0
-
-# =============================================================================
-# Padronização e percentuais
-# =============================================================================
-
-def _standardize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Renomeia colunas para nomes canônicos e cria campos derivados como A0aA3."""
-    if df is None or df.empty: 
-        return df
-    rename_map = {}
-    for canonical, aliases in SYN.items():
-        for a in aliases:
-            if a in df.columns:
-                rename_map[a] = canonical
-    df = df.rename(columns=rename_map)
-    if "A0" in df.columns or "A1aA3" in df.columns:
-        base_series = pd.Series(0, index=df.index, dtype="float64")
-        a0_series = pd.to_numeric(df["A0"], errors="coerce").fillna(0) if "A0" in df.columns else base_series
-        a1_series = pd.to_numeric(df["A1aA3"], errors="coerce").fillna(0) if "A1aA3" in df.columns else base_series
-        df["A0aA3"] = a0_series + a1_series
-    return df
-
-def _standardize_row(row: Dict[str, object]) -> Dict[str, object]:
-    """Normaliza um dicionário representando uma linha aplicando os sinônimos do schema."""
-    if not row:
-        return {}
-    normalized = dict(row)
-    for canonical, aliases in SYN.items():
-        for alias in aliases:
-            if alias in row and row[alias] is not None:
-                normalized[canonical] = row[alias]
-                break
-    def _to_float(val):
-        if val is None:
-            return 0.0
-        if isinstance(val, str):
-            s = val.strip()
-            s = s.replace(".", "").replace(",", ".")
-            s = s.replace("%", "").replace("R$", "").strip()
-            if not s:
-                return 0.0
-            try:
-                return float(s)
-            except ValueError:
-                return 0.0
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return 0.0
-    a0_val = _to_float(normalized.get("A0"))
-    a1_val = _to_float(normalized.get("A1aA3"))
-    if a0_val or a1_val:
-        normalized["A0aA3"] = a0_val + a1_val
-    return normalized
-
-def calc_pct(numerador: float, denominador: float) -> float:
-    """Calcula percentuais protegendo contra divisões inválidas."""
-    if denominador is None or pd.isna(denominador) or denominador <= 0:
-        return 0.0
-    numer = 0.0 if numerador is None or pd.isna(numerador) else float(numerador)
-    return (numer / float(denominador)) * 100.0
-
-# =============================================================================
-# Schemas e validação de CSVs
-# =============================================================================
-
-def get_schema_dAmostras() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha dAmostras."""
-    return {
-        "Loja": "string",
-        "Processo": "string",
-        "Amostra": "int",
-        "Minutos": "float",
-        "Tempo Médio": "float",  # opcional, pode ser derivado
-        "Desvio": "float",       # opcional
-        "Número de Amostras": "int",
-    }
-
-def get_schema_dEstrutura() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha dEstrutura."""
-    return {
-        "Loja": "string",
-        "Area Total": "float",
-        "Caixas": "int",
-        "Esp Conv": "boolean",
-        "Copa": "boolean",
-        "Escritorio": "boolean",
-        "Shopping": "boolean",
-        "HorasOperacionais": "float",
-        "DiasOperacionais": "float",
-    }
-
-def get_schema_dPessoas() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha dPessoas."""
-    return {
-        "Loja": "string",
-        "QtdAux": "int",
-        "QtdLid": "int",
-        "%disp": "float",
-    }
-
-def get_schema_fFaturamento() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha fFaturamento."""
-    return {
-        "Loja": "string",
-        "CodPedido": "int",
-        "NomeRevendedora": "string",
-        "Papel": "string",
-        "DataPedido": "date",
-        "HoraPedido": "string",          # formato hh:mm:ss ou hh:mm
-        "DataAprovacao": "date",
-        "HoraAprovacao": "string",       # manter como string/hh:mm:ss
-        "DataAutorizacao": "date",
-        "HoraAutorizacao": "string",     # manter como string/hh:mm:ss
-        "Faturamento": "float",
-        "Retirada": "boolean",
-        "CicloMarketing": "string",
-        "DiaCiclo": "int",
-        "Itens": "int",
-    }
-
-def get_schema_fIndicadores() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha fIndicadores."""
-    return {
-        "BCPS": "string",
-        "SAP": "string",
-        "Estado": "string",
-        "Praça": "string",
-        "Loja": "string",
-
-        "BaseTotal": "int",
-        "BaseAtiva": "int",
-        "Churn": "float",
-        "ReceitaTotalMes": "float",
-        "ReaisPorAtivo": "float",
-        "AtividadeER": "float",
-        "A0": "int",
-        "A1aA3": "int",
-        "I4aI6": "int",
-        "Inicios": "int",
-        "Reinicios": "int",
-        "Recuperados": "int",
-        "%daBaseTotal": "float",
-        "%doFatTotal": "float",
-        "%Ativos": "float",
-        "A0aA3": "int",
-        "TaxaReativacao": "float",
-        "TaxaReinicios": "float",
-        "%Retirada": "float",
-        "Faturamento/Hora": "float",
-        "Pedidos/Hora": "float",
-        "Pedidos/Dia": "float",
-        "Itens/Pedido": "float",
-    }
-
-def create_empty_from_schema(schema: Dict[str, str]) -> pd.DataFrame:
-    """Cria um DataFrame vazio com colunas e dtypes do schema informado."""
-    dtypes = {
-        "string": "object",
-        "float": "float64",
-        "int": "Int64",
-        "boolean": "boolean",
-        "date": "object",  # parse posterior
-    }
-    df = pd.DataFrame({col: pd.Series(dtype=dtypes[t]) for col, t in schema.items()})
-    return df
-
-def _ensure_columns(df: pd.DataFrame, required_cols: List[str]) -> List[str]:
-    """Verifica e retorna quais colunas obrigatórias ainda não existem no DataFrame."""
-    return [c for c in required_cols if c not in df.columns]
-
-def _coerce_types(df: pd.DataFrame, schema: Dict[str, str]) -> pd.DataFrame:
-    """Converte as colunas do DataFrame para os tipos definidos no schema."""
-    df = df.copy()
-    TRUE_VALS = ["VERDADEIRO", "SIM", "S", "TRUE", "T", "1"]
-    FALSE_VALS = ["FALSO", "NAO", "NÃO", "N", "FALSE", "F", "0"]
-    for col, t in schema.items():
-        if col not in df.columns:
-            continue
-        if t == "string":
-            def _to_text(x):
-                if pd.isna(x):
-                    return ""
-                # se veio número, formata sem ".0"
-                if isinstance(x, (int, np.integer)):
-                    return str(int(x))
-                if isinstance(x, (float, np.floating)):
-                    xi = float(x)
-                    if xi.is_integer():
-                        return str(int(xi))
-                    # remove zeros à direita e ponto se ficar no fim
-                    return str(x).rstrip("0").rstrip(".")
-                return str(x).strip()
-            df[col] = df[col].map(_to_text).astype("object")
-        elif t == "float":
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        elif t == "int":
-            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-        elif t == "boolean":
-            if df[col].dtype == 'bool' or str(df[col].dtype).startswith('boolean'):
-                df[col] = df[col].astype('boolean')
-            else:
-                s = df[col].astype(str).str.upper().str.strip()
-                df[col] = s.isin(TRUE_VALS).astype('boolean')
-        elif t == "date":
-            df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True).dt.date
-    return df
-
-def validate_df(df, schema, max_null_frac=0.3):
-    """Valida tipos e percentual de nulos de um DataFrame segundo o schema."""
-    errors = []
-    missing = _ensure_columns(df, list(schema.keys()))
-    if missing: errors.append(f"Colunas faltantes: {', '.join(missing)}")
-    df_cast = _coerce_types(df, schema)
-    for col, t in schema.items():
-        if col in df_cast.columns and t in ("float","int","date"):
-            frac = df_cast[col].isna().mean()
-            if frac > max_null_frac:
-                errors.append(f"Valores inválidos em '{col}' (~{frac:.0%})")
-    return (len(errors)==0), errors
-
-def template_df(schema: Dict[str, str]) -> pd.DataFrame:
-    """Gera um template vazio para download seguindo um schema."""
-    return create_empty_from_schema(schema)
-
-def to_csv_bytes(df: pd.DataFrame) -> bytes:
-    """Serializa o DataFrame em bytes de CSV prontos para download."""
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    return buf.getvalue().encode("utf-8")
-
-def read_csv_with_schema(file_obj, schema: Dict[str, str]) -> pd.DataFrame:
-    """Lê um CSV enviado e tenta adequá-lo ao schema conhecido."""
-    TRUE_VALS  = list(TRUE_BOOL_VALUES)
-    FALSE_VALS = list(FALSE_BOOL_VALUES)
-    string_cols = [c for c, t in schema.items() if t == "string"]
-    dtype_map = {c: "object" for c in string_cols}
-    # Robustez para CSVs com ; e vírgula decimal
-    try:
-        df = pd.read_csv(
-            file_obj,
-            sep=";",                # separador correto
-            encoding="utf-8-sig",   # remove BOM
-            decimal=",",            # vírgula decimal
-            true_values=TRUE_VALS,  # valores aceitos como True
-            false_values=FALSE_VALS,# valores aceitos como False
-            skipinitialspace=True,  # ignora espaço após ;
-            dtype=dtype_map,        # preserva 0 a esquerda;
-        )
-    except Exception:
-        df = pd.read_csv(file_obj)
-    df.columns = [str(c).strip() for c in df.columns]
-    df = _coerce_types(df, schema)
-    return df
-
-# =============================================================================
-# Busca por loja
-# =============================================================================
-
 # =============================================================================
 # Processos e cargas
 # =============================================================================
-
 def agregar_tempo_medio_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
     """
     Retorna DataFrame com colunas: Loja, Processo, tempo_medio_min
@@ -417,7 +98,6 @@ def agregar_tempo_medio_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
         grouped = df.groupby(["Loja", "Processo"], dropna=False)["Minutos"].mean().reset_index()
         grouped = grouped.rename(columns={"Minutos": "tempo_medio_min"})
     return grouped
-
 def inferir_frequencia_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
     """
     Cria uma tabela de frequências por (Loja, Processo) a partir de dAmostras.
@@ -426,7 +106,6 @@ def inferir_frequencia_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
     """
     if amostras is None or amostras.empty:
         return pd.DataFrame(columns=["Loja", "Processo", "frequencia"])
-
     df = amostras.copy()
     freq_col = None
     for col in df.columns:
@@ -434,7 +113,6 @@ def inferir_frequencia_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
         if "numero" in norm and "amostra" in norm:
             freq_col = col
             break
-
     group_cols = ["Loja", "Processo"]
     if freq_col:
         freq_df = df.groupby(group_cols, dropna=False)[freq_col].max().reset_index()
@@ -445,10 +123,8 @@ def inferir_frequencia_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
             freq_df = df.groupby(group_cols, dropna=False)[target_col].nunique().reset_index(name="frequencia")
         else:
             freq_df = df.groupby(group_cols, dropna=False).size().reset_index(name="frequencia")
-
     freq_df["frequencia"] = pd.to_numeric(freq_df["frequencia"], errors="coerce").fillna(0)
     return freq_df
-
 def calcular_carga_por_processo(tempos_processo: pd.DataFrame, frequencias: pd.DataFrame, fator_monotonia: float = 1.0) -> Tuple[pd.DataFrame, float]:
     """
     Junta tempos por processo (Loja, Processo, tempo_medio_min) com frequências (Loja, Processo, frequencia)
@@ -466,7 +142,6 @@ def calcular_carga_por_processo(tempos_processo: pd.DataFrame, frequencias: pd.D
     base["carga_horas"] = base["frequencia"] * base["tempo_medio_min"] / 60.0
     carga_total = float(base["carga_horas"].sum()) * fator_monotonia
     return base, carga_total
-
 def estimate_fluxo_medio_indicadores(
     base_ativa: float,
     atividade_er: float,
@@ -489,27 +164,22 @@ def estimate_fluxo_medio_indicadores(
             return max(0.0, v)
         except Exception:
             return 0.0
-
     dias = _safe_value(dias_operacionais)
     if dias <= 0:
         dias = 6.0
     dias = max(1.0, min(7.0, dias))
-
     horas_semanais = _safe_value(horas_operacionais_semanais)
     if horas_semanais <= 0:
         horas_semanais = dias * 10.0
     horas_semanais = max(dias, horas_semanais)
-
     atividade = _safe_value(atividade_er) / 100.0
     base_ativa_v = _safe_value(base_ativa)
     receita_mes = _safe_value(receita_total_mes)
     ticket_medio = _safe_value(reais_por_ativo)
     pedidos_dia_hist = _safe_value(pedidos_dia_hist)
     pedidos_hora_hist = _safe_value(pedidos_hora_hist)
-
     componentes: Dict[str, float] = {}
     candidatos: List[Tuple[str, float, float]] = []
-
     if base_ativa_v > 0 and atividade > 0:
         pedidos_semana_base = (base_ativa_v * atividade) / WEEKS_PER_MONTH
         componentes["base_ativa"] = pedidos_semana_base
@@ -526,7 +196,6 @@ def estimate_fluxo_medio_indicadores(
         pedidos_semana_hora = pedidos_hora_hist * horas_semanais
         componentes["pedidos_hora"] = pedidos_semana_hora
         candidatos.append(("pedidos_hora", pedidos_semana_hora, 0.9))
-
     pedidos_semana = 0.0
     if candidatos:
         soma_pesos = sum(peso for _, _, peso in candidatos)
@@ -537,7 +206,6 @@ def estimate_fluxo_medio_indicadores(
         "pedidos_hora": float(pedidos_hora),
         "componentes": componentes,
     }
-
 def estimate_pedidos_por_hora(
     indicadores: Dict[str, float],
     horas_operacionais_semanais: float,
@@ -553,7 +221,6 @@ def estimate_pedidos_por_hora(
     if dias <= 0:
         dias = 6.0
     dias = max(1.0, min(7.0, dias))
-
     if base <= 0 and horas_semanais > 0:
         pedidos_dia = safe_float(indicadores.get("Pedidos/Dia"), 0.0)
         if pedidos_dia > 0:
@@ -565,7 +232,6 @@ def estimate_pedidos_por_hora(
         if faturamento_hora > 0 and reais_por_ativo > 0:
             base = faturamento_hora / max(reais_por_ativo, 1.0)
     return max(base, 0.0)
-
 def estimate_process_frequencies_from_indicadores(
     base_total: float,
     base_ativa: float,
@@ -589,60 +255,43 @@ def estimate_process_frequencies_from_indicadores(
             return max(0.0, v)
         except Exception:
             return 0.0
-
     dias = _safe_positive(dias_operacionais)
     if dias <= 0:
         dias = 6.0
     dias = max(1.0, min(7.0, dias))
-
     pedidos_semana = _safe_positive(pedidos_semana)
     if pedidos_semana <= 0:
         pedidos_semana = 0.0
-
     itens_por_pedido = max(0.1, _safe_positive(itens_por_pedido))
     pct_retirada = max(0.0, min(100.0, _safe_positive(pct_retirada)))
-
     base_total_v = _safe_positive(base_total)
     base_ativa_v = _safe_positive(base_ativa)
     recuperados_v = _safe_positive(recuperados)
     inicios_v = _safe_positive(inicios)
     reinicios_v = _safe_positive(reinicios)
     atividade = _safe_positive(atividade_er) / 100.0
-
     resultado: Dict[str, float] = {}
-
     resultado_key = normalize_processo_nome("Reposição de prateleira (estoque)")
     resultado[resultado_key] = (pedidos_semana * itens_por_pedido) / 30.0
-
     resultado_key = normalize_processo_nome("Separação de mercadoria (on-line e retirada)")
     resultado[resultado_key] = pedidos_semana * (0.5 + 0.5 * (pct_retirada / 100.0))
-
     resultado_key = normalize_processo_nome("Faturamente de pedido (retirada e delivery)")
     resultado[resultado_key] = pedidos_semana
-
     resultado_key = normalize_processo_nome("Devolução")
     churn_component = ((1.0 - min(atividade, 0.99)) * base_ativa_v) / WEEKS_PER_MONTH
     resultado[resultado_key] = (recuperados_v * 0.5) + churn_component
-
     resultado_key = normalize_processo_nome("Cadastro de revendedor")
     resultado[resultado_key] = inicios_v / WEEKS_PER_MONTH
-
     resultado_key = normalize_processo_nome("Atualização de cadastro de revendedor")
     resultado[resultado_key] = reinicios_v / WEEKS_PER_MONTH
-
     resultado_key = normalize_processo_nome("Abertura e acompanhamento de chamado")
     resultado[resultado_key] = (recuperados_v * 0.8 + base_total_v * 0.02) / max(dias, 1.0)
-
     resultado_key = normalize_processo_nome("Eventos para os revendedores")
     resultado[resultado_key] = (base_total_v / 800.0) + (atividade * 2.0)
-
     return {k: float(max(0.0, v)) for k, v in resultado.items()}
-
 # =============================================================================
 # Preparação de features e modelagem
 # =============================================================================
-from .buscaDeLojas import _ensure_loja_key, _get_loja_row, _filter_df_by_loja
-
 def _bool_to_int(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     """Converte campos booleanos em inteiros 0/1 para alimentar o modelo."""
     df = df.copy()
@@ -661,31 +310,25 @@ def _bool_to_int(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
                 bool_ser = bool_ser.fillna(False)
             df[c] = bool_ser.astype(int)
     return df
-
 def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFrame:
     """Combina estrutura, pessoas e indicadores para montar o dataset de treino."""
     if dEstrutura is None or dEstrutura.empty: return pd.DataFrame()
     if dPessoas is None or dPessoas.empty: return pd.DataFrame()
-
     dEstrutura = _ensure_loja_key(dEstrutura)
     dPessoas = _ensure_loja_key(dPessoas)
     fIndicadores = _ensure_loja_key(fIndicadores)
-
     df = dEstrutura.copy()
     key_col = "Loja_norm" if "Loja_norm" in df.columns else "Loja"
-
     if "DiasOperacionais" in df.columns:
         df["DiasOperacionais"] = pd.to_numeric(df["DiasOperacionais"], errors="coerce").clip(1, 7)
         df["DiasOperacionais"] = df["DiasOperacionais"].fillna(6.0)
     else:
         df["DiasOperacionais"] = 6.0
-
     # normalizações de nomes
     if "Qtd Caixas" not in df.columns and "Caixas" in df.columns:
         df["Qtd Caixas"] = df["Caixas"]
     if "Espaco Evento" not in df.columns and "Esp Conv" in df.columns:
         df["Espaco Evento"] = df["Esp Conv"]
-
     # Horas operacionais (se vierem strings "HH:MM")
     for c in ["HoraAbertura","HoraFechamento"]:
         if c in df.columns:
@@ -700,11 +343,9 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
             except Exception:
                 return pd.NA
         df["HorasOperacionais"] = df.apply(_horas_op, axis=1)
-
     # target
     merge_key = key_col if key_col in dPessoas.columns else "Loja"
     df = pd.merge(df, dPessoas[[merge_key,"QtdAux"]], left_on=key_col, right_on=merge_key, how="inner")
-
     # indicadores (agregar por loja)
     if fIndicadores is not None and not fIndicadores.empty:
         ind_keep = [
@@ -726,10 +367,8 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         ind = fIndicadores.groupby(group_col, as_index=False)[cols[1:]].mean() if len(cols)>1 else None
         if ind is not None:
             df = pd.merge(df, ind, left_on=key_col, right_on=group_col, how="left")
-
     # booleans→int
     df = _bool_to_int(df, ["Escritorio","Copa","Espaco Evento"])
-
     # numericos
     for c in set(FEATURE_COLUMNS + ["QtdAux"]):
         if c in df.columns:
@@ -751,12 +390,10 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
     for extra_col in extra_numeric:
         if extra_col in df.columns:
             df[extra_col] = pd.to_numeric(df[extra_col], errors="coerce")
-
     if {"ReceitaTotalMes", "QtdAux"}.issubset(df.columns):
         receita = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce")
         qtd_aux_hist = pd.to_numeric(df["QtdAux"], errors="coerce").replace(0, pd.NA)
         df["ReceitaPorAux"] = (receita / qtd_aux_hist).replace([float("inf"), float("-inf")], pd.NA)
-
     def _fill_ratio(target: str, numerator_col: str, denom_col: str, fallback_col: Optional[str] = None, multiplier: float = 1.0):
         if numerator_col not in df.columns:
             return
@@ -773,20 +410,16 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
             df[target] = df[target].fillna(ratio)
         else:
             df[target] = ratio
-
     # derivar se faltar
     if "%Ativos" not in df.columns:
         df["%Ativos"] = pd.NA
     _fill_ratio("%Ativos", "BaseAtiva", "BaseTotal", multiplier=100.0)
-
     if "ReaisPorAtivo" not in df.columns:
         df["ReaisPorAtivo"] = pd.NA
     _fill_ratio("ReaisPorAtivo", "ReceitaTotalMes", "BaseAtiva")
-
     if "TaxaInicios" not in df.columns:
         df["TaxaInicios"] = pd.NA
     _fill_ratio("TaxaInicios", "Inicios", "BaseAtiva", fallback_col="BaseTotal", multiplier=100.0)
-
     if "TaxaReativacao" not in df.columns:
         df["TaxaReativacao"] = pd.NA
     if {"Recuperados", "I4aI6"}.issubset(df.columns):
@@ -796,142 +429,19 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         df["TaxaReativacao"] = df["TaxaReativacao"].fillna(ratio.replace([float("inf"), float("-inf")], pd.NA))
     else:
         _fill_ratio("TaxaReativacao", "Reinicios", "BaseAtiva", fallback_col="BaseTotal", multiplier=100.0)
-
     # limpa
     df = df.dropna(subset=["QtdAux"])
     # mantenha linhas com bastante feature; preencha poucos NaNs depois
-
     # se alguma feature existir mas está toda NaN, zere (evita median=NaN)
     for c in [col for col in FEATURE_COLUMNS if col in df.columns]:
         if df[c].isna().all():
             df[c] = 0.0
-
-    df, cluster_model = _apply_operational_derived_features(df, fit_cluster=True)
+    df, cluster_model = criar_features_operacionais(df, fit_cluster=True)
     if cluster_model is not None:
         df.attrs["cluster_model"] = cluster_model
     if "Loja_norm" in df.columns:
         df = df.drop(columns=["Loja_norm"])
     return df
-
-def _apply_operational_derived_features(
-    df: pd.DataFrame,
-    *,
-    fit_cluster: bool = False,
-    cluster_model: Optional["KMeans"] = None,
-) -> Tuple[pd.DataFrame, Optional["KMeans"]]:
-    """Enriquece o dataframe com features operacionais e fila contínua (sem clusters)."""
-    if df is None or df.empty:
-        return df, cluster_model
-    work = df.copy()
-    idx = work.index
-    dias = pd.to_numeric(work.get("DiasOperacionais"), errors="coerce").fillna(6.0)
-    dias = dias.clip(lower=1.0)
-    work["DiasOperacionais"] = dias
-    horas = pd.to_numeric(work.get("HorasOperacionais"), errors="coerce").fillna(8.0)
-    horas = horas.clip(lower=1.0)
-    work["HorasOperacionais"] = horas
-
-    def _ensure_series(val):
-        if isinstance(val, pd.Series):
-            return val
-        return pd.Series(val, index=idx)
-
-    volume_candidates = [
-        "VolumeTotal",
-        "BaseTotal",
-        "BaseAtiva",
-        "Pedidos/Dia",
-        "Pedidos/Hora",
-    ]
-    volume = pd.Series(0.0, index=idx, dtype="float64")
-    for col in volume_candidates:
-        if col not in work.columns:
-            continue
-        series = pd.to_numeric(work[col], errors="coerce")
-        if col == "Pedidos/Dia":
-            candidate = series * dias
-        elif col == "Pedidos/Hora":
-            candidate = series * dias * horas
-        else:
-            candidate = series
-        if candidate.notna().any():
-            volume = candidate.fillna(volume)
-            break
-    denom_dia = dias.replace(0, np.nan)
-    denom_hora = (dias * horas).replace(0, np.nan)
-    demanda_dia = (volume / denom_dia).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    demanda_hora = (volume / denom_hora).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    work["demanda_dia"] = demanda_dia
-    work["demanda_hora"] = demanda_hora
-
-    base_ativa = _ensure_series(pd.to_numeric(work.get("BaseAtiva"), errors="coerce"))
-    work["base_ativa_dia"] = (base_ativa / denom_dia).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    receita_total = _ensure_series(pd.to_numeric(work.get("ReceitaTotalMes"), errors="coerce"))
-    work["receita_dia"] = (receita_total / denom_dia).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    work["receita_hora"] = (receita_total / denom_hora).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    qtd_caixas = _ensure_series(pd.to_numeric(work.get("Qtd Caixas"), errors="coerce")).fillna(0.0)
-    work["capacidade_caixa_teorica"] = (qtd_caixas * horas).fillna(0.0)
-    work["receita_por_caixa"] = (
-        receita_total / qtd_caixas.replace(0, np.nan)
-    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    reais_por_ativo = _ensure_series(pd.to_numeric(work.get("ReaisPorAtivo"), errors="coerce"))
-    work["reais_por_ativo_dia"] = (
-        reais_por_ativo / denom_dia
-    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    i_cols = [c for c in ["I4", "I5", "I6", "I4aI6"] if c in work.columns]
-    if i_cols:
-        i_total = work[i_cols].apply(pd.to_numeric, errors="coerce").sum(axis=1, min_count=1)
-    else:
-        i_total = pd.Series(0.0, index=idx, dtype="float64")
-    work["i4i6_total"] = i_total.fillna(0.0)
-    work["i4i6_por_dia"] = (
-        work["i4i6_total"] / denom_dia
-    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    work["i4i6_por_hora"] = (
-        work["i4i6_total"] / denom_hora
-    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    work = _compute_queue_features(work)
-    work["cluster_loja"] = 0
-    return work, None
-
-def _compute_queue_features(df: pd.DataFrame, rho_target: float = DEFAULT_OCUPACAO_ALVO) -> pd.DataFrame:
-    """Adiciona c_fila_continuo e auxiliares derivados via teoria das filas."""
-    if df is None or df.empty:
-        return df
-    lambda_series = pd.to_numeric(df.get("demanda_hora"), errors="coerce").fillna(0.0)
-    tma_candidates = [
-        "tma_min",
-        "TMA_min",
-        "TMA",
-        "TempoMedio",
-        "TempoMedioAtendimento",
-        "Tempo Medio Atendimento",
-    ]
-    tma_series = None
-    for col in tma_candidates:
-        if col in df.columns:
-            series = pd.to_numeric(df[col], errors="coerce")
-            if series.notna().any():
-                tma_series = series
-                break
-    if tma_series is None:
-        tma_series = pd.Series(6.0, index=df.index, dtype="float64")
-    tma_series = tma_series.clip(lower=1e-3)
-    mu_series = 60.0 / tma_series
-    denom = (rho_target * mu_series).replace(0, np.nan)
-    c_fila = (lambda_series / denom).replace([np.inf, -np.inf], np.nan)
-    c_fila = c_fila.fillna(1.0)
-    c_fila = c_fila.clip(lower=1.0)
-    rho_real = (lambda_series / (c_fila * mu_series)).replace([np.inf, -np.inf], np.nan)
-    df["c_fila_continuo"] = c_fila
-    df["rho_fila_continuo"] = rho_real
-    return df
-
 def _assign_clusters(
     df: pd.DataFrame,
     *,
@@ -943,11 +453,9 @@ def _assign_clusters(
         return df, None
     df["cluster_loja"] = df.get("cluster_loja", 0).fillna(0).astype(int)
     return df, None
-
 def _augment_feature_row(feature_row: Dict[str, object], cluster_model: Optional["KMeans"]) -> Dict[str, object]:
     """Compatibilidade: retorna a própria linha sem enriquecimento adicional."""
     return feature_row
-
 def clean_training_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Aplica limpezas adicionais (target válido, winsorização e drop de colunas fracas)."""
     if df is None or df.empty:
@@ -955,13 +463,11 @@ def clean_training_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
     cleaned = df.copy()
     if "Loja_norm" in cleaned.columns:
         cleaned = cleaned.drop(columns=["Loja_norm"])
-
     if "QtdAux" in cleaned.columns:
         cleaned["QtdAux"] = pd.to_numeric(cleaned["QtdAux"], errors="coerce")
         cleaned = cleaned[(cleaned["QtdAux"].notna()) & (cleaned["QtdAux"] > 0)]
     if cleaned.empty:
         return cleaned
-
     cont_cols = [c for c in CONT if c in cleaned.columns]
     for c in cont_cols:
         cleaned[c] = pd.to_numeric(cleaned[c], errors="coerce").astype(float)
@@ -970,7 +476,6 @@ def clean_training_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
             lo, hi = valid.quantile([0.05, 0.95])
             if pd.notna(lo) and pd.notna(hi):
                 cleaned[c] = cleaned[c].clip(lo, hi)
-
     drop_cols: List[str] = []
     for col in cleaned.columns:
         if col in ("Loja", "QtdAux"):
@@ -986,7 +491,6 @@ def clean_training_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
         cleaned = cleaned.drop(columns=drop_cols)
     cleaned.attrs.update(getattr(df, "attrs", {}))
     return cleaned
-
 FEATURE_COLUMNS = [
     # estrutura física
     "Area Total", "Qtd Caixas", "DiasOperacionais",
@@ -998,17 +502,14 @@ FEATURE_COLUMNS = [
     # disponibilidade/operacao
     "HorasOperacionais",
 ]
-
 CONT = ["Area Total","Qtd Caixas","Pedidos/Hora","Pedidos/Dia",
         "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva","ReaisPorAtivo",
         "%Ativos","TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
-
 MODEL_ALGO_ORDER = ["catboost", "xgboost"]
 MODEL_ALGO_NAMES = {
     "catboost": "CatBoostRegressor",
     "xgboost": "XGBoostRegressor",
 }
-
 def _prepare_model_data(
     train_df: pd.DataFrame,
     mode: str,
@@ -1020,25 +521,20 @@ def _prepare_model_data(
     """
     if train_df is None or train_df.empty:
         return None
-
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return None
-
     used_features = [c for c in FEATURE_COLUMNS if c in train_df.columns]
     if not used_features:
         return None
-
     used_features = drop_high_correlation(train_df, used_features, thr=0.85)
     X = train_df[used_features].copy()
     y = make_target(train_df, mode=mode, horas_disp=horas_disp, margem=margem)
     y = pd.to_numeric(y, errors="coerce")
-
     mask_valid = y.notna()
     X, y = X.loc[mask_valid], y.loc[mask_valid]
     if X.empty:
         return None
-
     X, used_features = _reduce_features_by_mi(X, y, used_features)
     numeric_cols, categorical_cols = _infer_feature_types(X, used_features)
     X.attrs["numeric_features"] = numeric_cols
@@ -1057,24 +553,19 @@ def _prepare_model_data(
             fator = (receita_por_aux / max(ref, 1e-6)).clip(lower=0.4, upper=2.5).fillna(1.0)
             sample_weights = fator.reindex(base_weights.index, fill_value=1.0)
     return X, y, used_features, sample_weights
-
 def drop_high_correlation(df: pd.DataFrame, cols: List[str], thr: float = 0.85) -> List[str]:
     """Remove features altamente correlacionadas para evitar multicolinearidade."""
     X = df[[c for c in cols if c in df.columns]].copy()
     for c in X.columns:
         X[c] = pd.to_numeric(X[c], errors="coerce")
     X = X.dropna(how="all", axis=1)
-
     if X.shape[1] <= 1:
         return list(X.columns)
-
     # ordem por variância (labels, não posicional)
     var_order = X.var(numeric_only=True).sort_values(ascending=False)
     order = var_order.index.tolist()
-
     corr = X.corr(numeric_only=True).abs()
     to_drop: set = set()
-
     for i, c1 in enumerate(order):
         if c1 in to_drop:
             continue
@@ -1091,10 +582,8 @@ def drop_high_correlation(df: pd.DataFrame, cols: List[str], thr: float = 0.85) 
                     to_drop.add(c2)
                 else:
                     to_drop.add(c1 if var_order[c1] < var_order[c2] else c2)
-
     kept = [c for c in order if c not in to_drop]
     return kept
-
 def _reduce_features_by_mi(
     X: pd.DataFrame,
     y: pd.Series,
@@ -1119,74 +608,6 @@ def _reduce_features_by_mi(
     except Exception:
         pass
     return X, used_features
-
-class CatBoostQuantileModel:
-    """Empacota o CatBoost central + quantis P5/P95, mantendo metadados das features."""
-
-    def __init__(
-        self,
-        model_mid,
-        model_low,
-        model_high,
-        feature_names: List[str],
-        numeric_cols: List[str],
-        categorical_cols: List[str],
-        numeric_fill: Dict[str, float],
-        categorical_fill: str,
-    ) -> None:
-        self.model_mid = model_mid
-        self.model_low = model_low
-        self.model_high = model_high
-        self.model_feature_names_ = list(feature_names)
-        self.numeric_features_ = list(numeric_cols)
-        self.categorical_features_ = list(categorical_cols)
-        self.numeric_fill_values_ = dict(numeric_fill)
-        self.categorical_fill_value_ = categorical_fill
-        self.is_catboost_quantile = True
-        self.cluster_model_: Optional["KMeans"] = None
-
-    def _prepare_features(self, feature_row: Dict[str, object]) -> pd.DataFrame:
-        """Normaliza a linha de entrada para o CatBoost (unidades/valores iguais ao treino)."""
-        row = {c: feature_row.get(c, None) for c in self.model_feature_names_}
-        df = pd.DataFrame([row])
-        df = df.reindex(columns=self.model_feature_names_)
-        df = _bool_to_int(df, [c for c in ["Escritorio", "Copa", "Espaco Evento"] if c in df.columns])
-        for col in self.numeric_features_:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-                fill_val = self.numeric_fill_values_.get(col)
-                df[col] = df[col].fillna(0.0 if fill_val is None else fill_val)
-        for col in self.categorical_features_:
-            if col in df.columns:
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .replace({"nan": "", "None": ""})
-                    .replace("", np.nan)
-                    .fillna(self.categorical_fill_value_)
-                )
-        return df[self.model_feature_names_]
-
-    def predict_from_row(self, feature_row: Dict[str, object]) -> float:
-        df = self._prepare_features(feature_row)
-        return float(self.model_mid.predict(df)[0])
-
-    def predict_quantiles_from_row(self, feature_row: Dict[str, object]) -> Tuple[float, float, float]:
-        df = self._prepare_features(feature_row)
-        low = float(self.model_low.predict(df)[0])
-        mid = float(self.model_mid.predict(df)[0])
-        high = float(self.model_high.predict(df)[0])
-        return low, mid, high
-
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Compatibilidade básica com API sklearn (usa sempre o modelo central)."""
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X, columns=self.model_feature_names_)
-        preds: List[float] = []
-        for _, row in X.iterrows():
-            preds.append(self.predict_from_row(row.to_dict()))
-        return np.asarray(preds, dtype=float)
-
 def _infer_feature_types(
     X: pd.DataFrame,
     used_features: Optional[List[str]] = None,
@@ -1215,74 +636,6 @@ def _infer_feature_types(
         else:
             categorical_cols.append(col)
     return numeric_cols, categorical_cols
-
-def _build_xgb_preprocessor(
-    numeric_cols: List[str],
-    categorical_cols: List[str],
-) -> ColumnTransformer:
-    """Pré-processador específico para o XGBoost (numérico + OneHot para categóricas)."""
-    transformers = []
-    if numeric_cols:
-        transformers.append(
-            ("numericas", Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))]), numeric_cols)
-        )
-    if categorical_cols:
-        encoder_args: Dict[str, object] = {"handle_unknown": "ignore"}
-        # compatibilidade sklearn 1.2+ (sparse_output) vs. versões antigas (sparse)
-        if "sparse_output" in OneHotEncoder.__init__.__code__.co_varnames:
-            encoder_args["sparse_output"] = False
-        else:
-            encoder_args["sparse"] = False
-        transformers.append(
-            (
-                "categoricas",
-                Pipeline(
-                    steps=[
-                        ("imputer", SimpleImputer(strategy="most_frequent")),
-                        ("encoder", OneHotEncoder(**encoder_args)),
-                    ]
-                ),
-                categorical_cols,
-            )
-        )
-    return ColumnTransformer(
-        transformers=transformers,
-        remainder="drop",
-        verbose_feature_names_out=False,
-    )
-
-def _create_xgb_pipeline(
-    numeric_cols: List[str],
-    categorical_cols: List[str],
-    categorical_cardinality: Optional[Dict[str, int]] = None,
-) -> Pipeline:
-    """Cria o pipeline completo (pré-processamento + estimador XGBoost)."""
-    if XGBRegressor is None:
-        raise ImportError("XGBoostRegressor indisponível. Instale 'xgboost'.")
-    preprocessor = _build_xgb_preprocessor(numeric_cols, categorical_cols)
-    monotone_str = None
-    estimator = XGBRegressor(
-        n_estimators=320,  # reduzido p/ performance e fim do travamento
-        learning_rate=0.06,
-        max_depth=6,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        min_child_weight=2.0,
-        gamma=0.15,
-        objective="reg:squarederror",
-        reg_alpha=0.4,
-        reg_lambda=1.2,
-        random_state=42,
-        tree_method="hist",
-        monotone_constraints=monotone_str,
-    )
-    return Pipeline(
-        steps=[
-            ("preprocessamento", preprocessor),
-            ("modelo", estimator),
-        ]
-    )
-
 def train_auxiliares_model(
     train_df: pd.DataFrame,
     mode: str = "historico",
@@ -1296,7 +649,6 @@ def train_auxiliares_model(
         prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
     if prepared is None:
         return None
-
     X_full, y_full, used_features, sample_weights = prepared
     X = X_full.copy()
     y = y_full.copy()
@@ -1304,88 +656,32 @@ def train_auxiliares_model(
         sample_weights = sample_weights.reindex(X.index).fillna(1.0)
     else:
         sample_weights = pd.Series(1.0, index=X.index, dtype="float64")
-
     algo = (algo or "xgboost").lower()
     numeric_cols = X.attrs.get("numeric_features")
     categorical_cols = X.attrs.get("categorical_features")
     if numeric_cols is None or categorical_cols is None:
         numeric_cols, categorical_cols = _infer_feature_types(X, used_features)
-
-    cluster_model = getattr(X_full, "attrs", {}).get("cluster_model")
     cat_cardinality = getattr(X_full, "attrs", {}).get("categorical_cardinality", {})
-
     if algo == "catboost":
-        if CatBoostRegressor is None:
-            raise ImportError("CatBoostRegressor indisponível. Instale 'catboost'.")
-        feature_order = [c for c in used_features if c in X.columns]
-        if not feature_order:
-            return None
-        X_proc = X[feature_order].copy()
-        numeric_in_model = [col for col in (numeric_cols or []) if col in X_proc.columns]
-        categorical_in_model = [col for col in (categorical_cols or []) if col in X_proc.columns]
-        numeric_fill_series = pd.Series(dtype="float64")
-        if numeric_in_model:
-            numeric_fill_series = X_proc[numeric_in_model].median(numeric_only=True).fillna(0.0)
-            X_proc[numeric_in_model] = X_proc[numeric_in_model].fillna(numeric_fill_series)
-        cat_fill_val = "missing"
-        if categorical_in_model:
-            for col in categorical_in_model:
-                X_proc[col] = (
-                    X_proc[col]
-                    .astype(str)
-                    .replace({"nan": "", "None": ""})
-                    .replace("", np.nan)
-                    .fillna(cat_fill_val)
-                )
-        cat_feature_indices = [X_proc.columns.get_loc(col) for col in categorical_in_model]
-        sample_weight_np = sample_weights.to_numpy(dtype=float)
-
-        def _fit_cat_model(loss: str) -> CatBoostRegressor:
-            model_cb = CatBoostRegressor(
-                depth=6,
-                learning_rate=0.05,
-                n_estimators=800,
-                subsample=0.9,
-                l2_leaf_reg=5.0,
-                loss_function=loss,
-                random_seed=42,
-                verbose=False,
-                allow_writing_files=False,
-            )
-            model_cb.fit(
-                X_proc,
-                y,
-                cat_features=cat_feature_indices,
-                sample_weight=sample_weight_np,
-            )
-            return model_cb
-
-        model_mid = _fit_cat_model("RMSE")
-        model_low = _fit_cat_model("Quantile:alpha=0.01")
-        model_high = _fit_cat_model("Quantile:alpha=0.99")
-        wrapper = CatBoostQuantileModel(
-            model_mid=model_mid,
-            model_low=model_low,
-            model_high=model_high,
-            feature_names=feature_order,
-            numeric_cols=numeric_in_model,
-            categorical_cols=categorical_in_model,
-            numeric_fill=numeric_fill_series.to_dict(),
-            categorical_fill=cat_fill_val,
+        return train_catboost_model(
+            X=X,
+            y=y,
+            used_features=used_features,
+            numeric_cols=numeric_cols or [],
+            categorical_cols=categorical_cols or [],
+            sample_weights=sample_weights,
         )
-        return wrapper
-
     if algo == "xgboost":
-        model = _create_xgb_pipeline(numeric_cols, categorical_cols)
-        fit_params = {"modelo__sample_weight": sample_weights.to_numpy(dtype=float)}
-        model.fit(X, y, **fit_params)
-        model.model_feature_names_ = list(used_features)
-        model.numeric_features_ = list(numeric_cols)
-        model.categorical_features_ = list(categorical_cols)
-        return model
-
-    raise ValueError(f"Algoritmo '{algo}' não suportado.")
-
+        return train_xgboost_model(
+            X=X,
+            y=y,
+            used_features=used_features,
+            numeric_cols=numeric_cols or [],
+            categorical_cols=categorical_cols or [],
+            sample_weights=sample_weights,
+            categorical_cardinality=cat_cardinality,
+        )
+    raise ValueError(f"Algoritmo '{algo}' n?o suportado.")
 def _determine_test_fraction(n_samples: int, desired: float) -> float:
     """Ajusta o percentual da base de teste garantindo pelo menos 1 observação."""
     if n_samples <= 1:
@@ -1393,7 +689,6 @@ def _determine_test_fraction(n_samples: int, desired: float) -> float:
     min_frac = 1.0 / max(n_samples, 1)
     frac = max(desired, min_frac)
     return float(min(0.4, max(frac, 0.2)))
-
 def _split_train_test_data(
     X: pd.DataFrame,
     y: pd.Series,
@@ -1429,7 +724,6 @@ def _split_train_test_data(
         "sample_weight_train": sw_train,
         "sample_weight_test": sw_test,
     }
-
 def train_all_auxiliares_models(
     train_df: pd.DataFrame,
     mode: str = "historico",
@@ -1441,12 +735,10 @@ def train_all_auxiliares_models(
     algos = algos or MODEL_ALGO_ORDER
     models: Dict[str, object] = {}
     errors: Dict[str, str] = {}
-
     prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
     if prepared is None:
         errors["_geral"] = "Sem dados suficientes para treinar (faltam features ou target)."
         return models, errors
-
     for algo in algos:
         try:
             model = train_auxiliares_model(
@@ -1462,11 +754,9 @@ def train_all_auxiliares_models(
             continue
         if model is not None:
             models[algo] = model
-
     if not models and "_geral" not in errors:
         errors["_geral"] = "Falha ao treinar os modelos."
     return models, errors
-
 def make_target(train_df: pd.DataFrame,
                 mode: str = "historico",
                 horas_disp: float = 6.0,
@@ -1477,10 +767,8 @@ def make_target(train_df: pd.DataFrame,
     - ideal: usa carga teórica / horas_disp, com fallback para QtdAux se não houver carga
     """
     y_hist = pd.to_numeric(train_df["QtdAux"], errors="coerce")
-
     if mode == "historico":
         return y_hist
-
     # mode == "ideal"
     # Se no futuro você criar uma coluna de carga por loja (ex: CargaTeoricaHoras),
     # ela entra aqui. Por enquanto, deixa preparado:
@@ -1488,7 +776,6 @@ def make_target(train_df: pd.DataFrame,
     if "CargaTeoricaHoras" in train_df.columns:
         carga = pd.to_numeric(train_df["CargaTeoricaHoras"], errors="coerce")
         y_ideal = (carga / horas_disp) * (1.0 + margem)
-
     y_final = y_ideal.fillna(y_hist)
     receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
     receita_por_aux = receita_por_aux.replace([np.inf, -np.inf], np.nan)
@@ -1499,22 +786,17 @@ def make_target(train_df: pd.DataFrame,
             ajuste = (ref / receita_por_aux).clip(lower=0.55, upper=1.45).fillna(1.0)
             y_final = y_final * ajuste.reindex(y_final.index, fill_value=1.0)
     return y_final.clip(lower=0.0)
-
 def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.Series:
     """Retorna série com receita (mês ou hora) dividida por auxiliar."""
     if train_df is None or qtd_aux is None or train_df.empty:
         return pd.Series(dtype="float64")
-
     qaux = pd.to_numeric(qtd_aux, errors="coerce").replace(0, np.nan)
     base = pd.Series(np.nan, index=train_df.index, dtype="float64")
-
     if "ReceitaPorAux" in train_df.columns:
         base = pd.to_numeric(train_df["ReceitaPorAux"], errors="coerce")
-
     if base.notna().sum() < 3 and "ReceitaTotalMes" in train_df.columns:
         receita_mes = pd.to_numeric(train_df["ReceitaTotalMes"], errors="coerce")
         base = receita_mes / qaux
-
     if (base.notna().sum() < 3) and "Faturamento/Hora" in train_df.columns:
         faturamento_hora = pd.to_numeric(train_df["Faturamento/Hora"], errors="coerce")
         horas_raw = train_df.get("HorasOperacionais")
@@ -1527,9 +809,7 @@ def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.S
             horas = horas.where(horas > 0, np.nan)
             fator_tempo = horas.fillna(1.0)
         base = (faturamento_hora * fator_tempo) / qaux
-
     return base.replace([np.inf, -np.inf], np.nan)
-
 def predict_qtd_auxiliares(
     model: Pipeline,
     feature_row: Dict[str, object],
@@ -1538,72 +818,28 @@ def predict_qtd_auxiliares(
     return_details: bool = False,
 ) -> Union[float, Tuple[float, Dict[str, float]]]:
     """
-    Executa o pipeline treinado em uma nova linha de features sem aplicar pós-processamento da fila.
-
-    O parâmetro with_queue_adjustment foi mantido apenas para compatibilidade e não altera mais o
-    resultado; a teoria das filas agora é apresentada como um terceiro modelo independente.
+    Executa o pipeline treinado em uma nova linha de features sem aplicar pos-processamento da fila.
+    O parametro with_queue_adjustment foi mantido apenas para compatibilidade e nao altera mais o
+    resultado; a teoria das filas agora e apresentada como um terceiro modelo independente.
     """
     if model is None:
-        raise ValueError("Modelo não treinado.")
-    cluster_model = getattr(model, "cluster_model_", None)
-    feature_names = (
-        getattr(model, "model_feature_names_", None)
-        or getattr(model, "feature_names_", None)
-        or list(getattr(model, "feature_names_in_", []))
+        raise ValueError("Modelo nao treinado.")
+    model_name = model.__class__.__name__.lower()
+    is_catboost = isinstance(model, CatBoostQuantileModel) or ("catboost" in model.__class__.__module__.lower()) or (
+        "catboost" in model_name
     )
-    if not feature_names:
-        raise ValueError("Pipeline não contém feature_names_. Re-treine com o novo train_auxiliares_model.")
-
-    row = {c: feature_row.get(c, None) for c in feature_names}
-    df = pd.DataFrame([row])
-    df = df.reindex(columns=feature_names)
-    df = _bool_to_int(df, [c for c in ["Escritorio", "Copa", "Espaco Evento"] if c in df.columns])
-
-    numeric_cols = getattr(model, "numeric_features_", []) or []
-    categorical_cols = getattr(model, "categorical_features_", []) or []
-
-    def _prepare_for_catboost() -> pd.DataFrame:
-        df_local = df.copy()
-        numeric_fill = getattr(model, "numeric_fill_values_", {}) or {}
-        if numeric_cols:
-            for col in numeric_cols:
-                if col in df_local.columns:
-                    df_local[col] = pd.to_numeric(df_local[col], errors="coerce")
-                    fill_val = numeric_fill.get(col)
-                    df_local[col] = df_local[col].fillna(fill_val if fill_val is not None else 0.0)
-        if categorical_cols:
-            cat_fill = getattr(model, "categorical_fill_value_", "missing")
-            for col in categorical_cols:
-                if col in df_local.columns:
-                    df_local[col] = df_local[col].astype(str).replace("nan", "").replace("None", "")
-                    df_local[col] = df_local[col].replace("", np.nan).fillna(cat_fill)
-        return df_local[feature_names]
-
-    if isinstance(model, CatBoostQuantileModel):
-        pred = model.predict_from_row(feature_row)
-    elif CatBoostRegressor is not None and isinstance(model, CatBoostRegressor):
-        df_model = _prepare_for_catboost()
-        pred = float(model.predict(df_model)[0])
+    if is_catboost:
+        pred_result = predict_catboost(model, feature_row)
     else:
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        for col in categorical_cols:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
-        fill_vals = getattr(model, "fill_values_", None)
-        if fill_vals is not None:
-            df = df.fillna(fill_vals)
-        pred = float(model.predict(df)[0])
-
+        pred_result = predict_xgboost(model, feature_row)
+    pred = float(pred_result.get("pred", np.nan))
     if not math.isfinite(pred):
-        raise ValueError("Predição inválida (NaN/inf).")
-
+        raise ValueError("Predicao invalida (NaN/inf).")
     base_pred = max(0.0, pred)
     queue_diag: Optional[Dict[str, float]] = None
     if return_details:
         queue_inputs = estimate_queue_inputs(feature_row)
-        fila_diag = calcular_fila(
+        fila_diag = diagnosticar_fila(
             queue_inputs["lambda_hora"],
             queue_inputs["tma_min"],
             max(base_pred, 1e-6),
@@ -1616,156 +852,9 @@ def predict_qtd_auxiliares(
             "mu_hora": float(fila_diag["mu_hora"]),
             "rho": float(fila_diag["rho"]),
         }
-
     if return_details:
         return base_pred, (queue_diag or {})
     return base_pred
-
-def _estimate_operating_hours_per_day(feature_row: Dict[str, object]) -> float:
-    """Retorna horas operacionais por dia da loja (em horas)."""
-    horas_dia = safe_float(feature_row.get("HorasOperacionais"), 0.0)
-    dias_oper = safe_float(feature_row.get("DiasOperacionais"), 0.0) or 6.0
-    if horas_dia <= 0:
-        horas_form = safe_float(feature_row.get("horas_operacionais_form"), 0.0)
-        if horas_form > 0:
-            horas_dia = horas_form / max(dias_oper, 1.0) if horas_form > 24 else horas_form
-    if horas_dia <= 0:
-        horas_semana = safe_float(feature_row.get("HorasOperacionaisSemana"), 0.0)
-        if horas_semana > 0:
-            horas_dia = horas_semana / max(dias_oper, 1.0)
-    if horas_dia <= 0:
-        horas_dia = safe_float(feature_row.get("horas_loja_config"), 0.0)
-        if horas_dia > 24:
-            horas_dia = horas_dia / max(dias_oper, 1.0)
-    return max(horas_dia, 1.0)
-
-def _estimate_arrival_rate(feature_row: Dict[str, object]) -> float:
-    """Estimativa de λ (atendimentos/hora)."""
-    horas_dia = _estimate_operating_hours_per_day(feature_row)
-    pedidos_hora = safe_float(feature_row.get("Pedidos/Hora"), 0.0)
-    if pedidos_hora <= 0:
-        pedidos_dia = safe_float(feature_row.get("Pedidos/Dia"), 0.0)
-        if pedidos_dia > 0 and horas_dia > 0:
-            pedidos_hora = pedidos_dia / max(horas_dia, 1e-3)
-    return max(pedidos_hora, 0.0)
-
-def _estimate_service_time_minutes(feature_row: Dict[str, object]) -> float:
-    """Tenta inferir o tempo médio de atendimento (MINUTOS)."""
-    candidate_keys = [
-        "TempoMedioAtendimento",
-        "Tempo Medio Atendimento",
-        "TempoMedio",
-        "Tempo Médio",
-        "tmedio_min_atendimento",
-        "TMA",
-        "TMA_min",
-    ]
-    for key in candidate_keys:
-        if key in feature_row:
-            val = safe_float(feature_row.get(key), 0.0)
-            if val > 0:
-                # heurística: valores muito altos provavelmente estão em segundos; valores baixos (<0.5) em horas
-                if val > 300:  # supondo segundos
-                    val = val / 60.0
-                elif val < 0.5:
-                    val = val * 60.0
-                return val
-    # fallback genérico da calculadora
-    return 6.0
-
-def estimate_queue_inputs(feature_row: Dict[str, object]) -> Dict[str, float]:
-    """
-    Retorna parâmetros (λ, TMA e μ) usados pelos diagnósticos de fila.
-
-    λ é sempre clientes por hora (convertemos volumes diários dividindo pelas horas operacionais);
-    TMA retorna minutos por atendimento; μ = 1/TMA em horas.
-    """
-    lambda_hora = _estimate_arrival_rate(feature_row)
-    tma_min = _estimate_service_time_minutes(feature_row)
-    tma_hora = tma_min / 60.0
-    mu_hora = 0.0 if tma_hora <= 0 else 1.0 / tma_hora
-    return {
-        "lambda_hora": float(lambda_hora),
-        "tma_min": float(tma_min),
-        "tma_hora": float(tma_hora),
-        "mu_hora": float(mu_hora),
-    }
-
-def calcular_fila(lambda_hora: float, tma_min: float, capacidade: float) -> Dict[str, float]:
-    """Calcula métricas básicas da fila M/M/c.
-
-    Parâmetros:
-        lambda_hora : chegadas por HORA (atendimentos/h)
-        tma_min     : tempo médio de atendimento em MINUTOS
-        capacidade  : número de auxiliares (float)
-
-    Conversões:
-        tma_hora = tma_min / 60
-        mu_hora = 1 / tma_hora  (capacidade de cada auxiliar em atend/h)
-        ρ = lambda_hora / (capacidade * mu_hora)
-    """
-    lambda_hora = max(float(lambda_hora), 0.0)
-    tma_min = max(float(tma_min), 1e-6)
-    tma_hora = tma_min / 60.0  # horas por atendimento
-    mu_hora = 0.0 if tma_hora <= 0 else 1.0 / tma_hora
-    capacidade = max(float(capacidade), 0.0)
-    if capacidade <= 0 or mu_hora <= 0:
-        rho = float("nan")
-    else:
-        rho = lambda_hora / (capacidade * mu_hora)
-    return {
-        "lambda_hora": lambda_hora,
-        "tma_min": tma_min,
-        "mu_hora": mu_hora,
-        "capacidade": capacidade,
-        "rho": rho,
-    }
-
-def modelo_fila(
-    lambda_hora: float,
-    tma_min: float,
-    rho_target: float = DEFAULT_OCUPACAO_ALVO,
-    calibration_factor: float = QUEUE_CALIBRATION_DEFAULT,
-) -> Dict[str, float]:
-    """
-    Calcula o headcount bruto e a utilização alvo segundo a teoria das filas.
-
-    A calibragem (facultativa) apenas escala a carga efetiva λ.
-    """
-    lambda_hora = max(float(lambda_hora), 0.0)
-    tma_min = max(float(tma_min), 1e-6)
-    if not math.isfinite(rho_target) or rho_target <= 0:
-        rho_target = DEFAULT_OCUPACAO_ALVO
-    rho_target = float(min(0.99, max(rho_target, 1e-3)))
-    tma_hora = tma_min / 60.0
-    mu_hora = 0.0 if tma_hora <= 0 else 1.0 / tma_hora
-    if not math.isfinite(calibration_factor) or calibration_factor <= 0:
-        calibration_factor = QUEUE_CALIBRATION_DEFAULT
-    lambda_efetivo = lambda_hora * calibration_factor
-    if mu_hora <= 0 or rho_target <= 0:
-        c_fila_bruto = float("nan")
-        c_fila = 1.0
-    else:
-        c_fila_bruto = lambda_efetivo / (rho_target * mu_hora)
-        c_fila = max(1.0, float(c_fila_bruto))
-    denom = c_fila * mu_hora
-    rho_fila = float("nan") if denom <= 0 else lambda_hora / denom
-    diag = {
-        "lambda_hora": float(lambda_hora),
-        "lambda_efetivo": float(lambda_efetivo),
-        "tma_min": float(tma_min),
-        "tma_hora": float(tma_hora),
-        "mu_hora": float(mu_hora),
-        "rho_target": float(rho_target),
-        "calibration_factor": float(calibration_factor),
-        "c_fila_bruto": float(c_fila_bruto),
-        "c_fila": float(c_fila),
-        "rho_fila": float(rho_fila),
-    }
-    if QUEUE_DEBUG:
-        print(f"[modelo_fila] {diag}")
-    return diag
-
 def vif_via_aux_regressions(df: pd.DataFrame, cols: List[str]) -> List[Tuple[str, float]]:
     """Estima o VIF ajustando regressões auxiliares entre as features."""
     from sklearn.linear_model import LinearRegression
@@ -1790,13 +879,11 @@ def vif_via_aux_regressions(df: pd.DataFrame, cols: List[str]) -> List[Tuple[str
         vif = 1.0 / (1.0 - r2)
         out.append((name, float(vif)))
     return out
-
 def collinearity_report(df: pd.DataFrame, cols: List[str], corr_thr: float = 0.85) -> Dict[str, object]:
     """Gera métricas e alertas de multicolinearidade para as features."""
     X = df[[c for c in cols if c in df.columns]].copy()
     for c in X.columns: X[c] = pd.to_numeric(X[c], errors="coerce")
     X = X.dropna(how="all", axis=1).fillna(X.median(numeric_only=True))
-
     corr = X.corr(numeric_only=True)
     high_corr_pairs = []
     for i, c1 in enumerate(corr.columns):
@@ -1805,17 +892,14 @@ def collinearity_report(df: pd.DataFrame, cols: List[str], corr_thr: float = 0.8
             r = corr.loc[c1, c2]
             if np.isfinite(r) and abs(r) >= corr_thr:
                 high_corr_pairs.append((c1, c2, float(r)))
-
     vif_list = vif_via_aux_regressions(X, list(X.columns))
     return {"corr_matrix": corr, "high_corr_pairs": high_corr_pairs, "vif": vif_list}
-
 def smape(y_true, y_pred, eps=1e-6):
     """Calcula o SMAPE entre valores reais e previstos."""
     y_true = np.asarray(y_true, float)
     y_pred = np.asarray(y_pred, float)
     denom = (np.abs(y_true) + np.abs(y_pred)).clip(min=eps)
     return np.mean(np.abs(y_pred - y_true) / denom)
-
 def _mean_absolute_percentage_error_safe(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Calcula o MAPE ignorando observações cujo valor real é zero para evitar divisão por zero."""
     mask = np.isfinite(y_true) & np.isfinite(y_pred) & (y_true != 0)
@@ -1823,14 +907,13 @@ def _mean_absolute_percentage_error_safe(y_true: np.ndarray, y_pred: np.ndarray)
         return float("nan")
     ape = np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])
     return float(np.mean(ape))
-
 def evaluate_trained_model(
     model_name: str,
     model: Pipeline,
     X_test: pd.DataFrame,
     y_test: pd.Series,
 ) -> Dict[str, object]:
-    """Calcula métricas padrão e avisos de sanidade para um pipeline treinado."""
+    """Calcula m?tricas padr?o e avisos de sanidade para um pipeline treinado."""
     warnings_list: List[str] = []
     preds_list: List[float] = []
     for _, row in X_test.iterrows():
@@ -1846,39 +929,36 @@ def evaluate_trained_model(
         preds_list.append(val)
     preds_np = np.asarray(preds_list, dtype=float)
     if not np.all(np.isfinite(preds_np)):
-        warnings_list.append("Predições possuem valores NaN ou infinitos.")
+        warnings_list.append("Predicoes possuem valores NaN ou infinitos.")
     y_true_np = y_test.to_numpy(dtype=float) if isinstance(y_test, pd.Series) else np.asarray(y_test, dtype=float)
     mask = np.isfinite(preds_np) & np.isfinite(y_true_np)
     if not mask.any():
         return {
             "model_name": model_name,
-            "warnings": warnings_list + ["Sem amostras válidas para avaliação."],
+            "warnings": warnings_list + ["Sem amostras validas para avaliacao."],
             "n_test": 0,
         }
     preds_valid = preds_np[mask]
     y_valid = y_true_np[mask]
-    r2 = float("nan")
+    r2_val = float("nan")
     if len(np.unique(y_valid)) > 1:
-        r2 = float(r2_score(y_valid, preds_valid))
-    mae = float(mean_absolute_error(y_valid, preds_valid))
-    mse_val = float(mean_squared_error(y_valid, preds_valid))
-    rmse = float(np.sqrt(mse_val)) if np.isfinite(mse_val) else float("nan")
-    mape = _mean_absolute_percentage_error_safe(y_valid, preds_valid)
-    smape_val = float(smape(y_valid, preds_valid))
-    precision = 1.0 - mape if np.isfinite(mape) else float("nan")
-
-    if np.isfinite(r2) and r2 < -1.0:
-        warnings_list.append("R² abaixo de -1. Pode haver desalinhamento de dados.")
-    if np.isfinite(mape) and mape > 1.0:
+        r2_val = r2(y_valid, preds_valid)
+    mae_val = mae(y_valid, preds_valid)
+    rmse_val = rmse(y_valid, preds_valid)
+    mape_val = mape_safe(y_valid, preds_valid)
+    smape_val = smape(y_valid, preds_valid)
+    precision = precision_from_mape(mape_val) if np.isfinite(mape_val) else float("nan")
+    if np.isfinite(r2_val) and r2_val < -1.0:
+        warnings_list.append("R2 abaixo de -1. Pode haver desalinhamento de dados.")
+    if np.isfinite(mape_val) and mape_val > 1.0:
         warnings_list.append("MAPE acima de 100%. Erro percentual muito alto.")
-
     metrics: Dict[str, object] = {
         "model_name": model_name,
-        "R2": r2 if np.isfinite(r2) else np.nan,
-        "R2_mean": r2 if np.isfinite(r2) else np.nan,
-        "MAE": mae,
-        "RMSE": rmse,
-        "MAPE": mape if np.isfinite(mape) else np.nan,
+        "R2": r2_val if np.isfinite(r2_val) else np.nan,
+        "R2_mean": r2_val if np.isfinite(r2_val) else np.nan,
+        "MAE": mae_val,
+        "RMSE": rmse_val,
+        "MAPE": mape_val if np.isfinite(mape_val) else np.nan,
         "SMAPE": smape_val if np.isfinite(smape_val) else np.nan,
         "Precisao": precision if np.isfinite(precision) else np.nan,
         "Precisao_percent": (precision * 100.0) if np.isfinite(precision) else np.nan,
@@ -1887,7 +967,6 @@ def evaluate_trained_model(
     if warnings_list:
         metrics["warnings"] = warnings_list
     return metrics
-
 def evaluate_model_cv(
     train_df: pd.DataFrame,
     n_splits: int = 5,  # legado
@@ -1901,16 +980,13 @@ def evaluate_model_cv(
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
-
     prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
     if prepared is None:
         return {}
-
     X_full, y_full, used_features, sample_weights = prepared
     split = _split_train_test_data(X_full, y_full, sample_weights, test_size=0.25, random_state=42)
     if split is None:
         return {}
-
     algo_list = [algo.lower()] if algo else MODEL_ALGO_ORDER
     metrics_map: Dict[str, object] = {}
     for algo_name in algo_list:
@@ -1935,11 +1011,9 @@ def evaluate_model_cv(
             split['X_test'],
             split['y_test'],
         )
-
     if algo:
         return metrics_map.get(algo_list[0], {})
     return metrics_map
-
 def predict_with_uncertainty(
     train_df: pd.DataFrame,
     feature_row: Dict[str, object],
@@ -1957,7 +1031,6 @@ def predict_with_uncertainty(
     prepared_full = _prepare_model_data(train_df, mode, horas_disp, margem)
     if prepared_full is None:
         return {}
-
     if algo == "catboost":
         model_cat = train_auxiliares_model(
             train_df,
@@ -1973,30 +1046,17 @@ def predict_with_uncertainty(
             low_raw, mid_raw, high_raw = model_cat.predict_quantiles_from_row(feature_row)
         except Exception:
             return {}
-        low_val = float(min(low_raw, high_raw))
-        high_val = float(max(low_raw, high_raw))
-        mid_val = float(mid_raw)
-        low_disp = float(low_val)
-        high_disp = float(high_val)
-        if math.isclose(high_disp, low_disp, abs_tol=1e-3):
-            high_disp = low_disp + 0.01
-        mid_disp = float(mid_val)
+        interval = intervalo_90_catboost(low_raw, mid_raw, high_raw)
         return {
-            "pred_mean": mid_val,
-            "ci_low": low_val,
-            "ci_high": high_val,
+            **interval,
             "ci_label": "Int. 98% (CatBoost pré-fila)",
-            "ci_low_disp": float(low_disp),
-            "ci_high_disp": float(high_disp),
-            "ci_mid_disp": float(mid_disp),
-            "ci_low_raw": low_val,
-            "ci_high_raw": high_val,
+            "ci_low_raw": interval["ci_low"],
+            "ci_high_raw": interval["ci_high"],
             "ci_low_raw_disp": None,
             "ci_high_raw_disp": None,
-            "ci_mid_raw_disp": float(mid_disp),
+            "ci_mid_raw_disp": interval.get("ci_mid_disp"),
             "ci_label_raw": None,
         }
-
     X_full, y_full, used_features, sample_weights_full = prepared_full
     if isinstance(sample_weights_full, pd.Series):
         sw_series = sample_weights_full.reindex(X_full.index).fillna(1.0)
@@ -2036,37 +1096,20 @@ def predict_with_uncertainty(
         preds_raw.append(raw_val)
     if not preds_raw:
         return {}
-    lo_raw, hi_raw = np.percentile(preds_raw, list(q))
-
-    def _format_bounds(lo_val: float, hi_val: float, mid_val: float) -> Tuple[float, float, float]:
-        lo_disp = float(lo_val)
-        hi_disp = float(hi_val if hi_val > lo_val else lo_val)
-        if math.isclose(hi_disp, lo_disp, abs_tol=1e-3):
-            hi_disp = lo_disp + 0.01
-        mid_disp = float(mid_val)
-        return lo_disp, hi_disp, mid_disp
-
-    low_disp_raw, high_disp_raw, mid_disp_raw = _format_bounds(lo_raw, hi_raw, float(np.mean(preds_raw)))
-
+    interval = intervalo_90_bootstrap(preds_raw, q=q)
     return {
-        "pred_mean": float(np.mean(preds_raw)),
-        "ci_low": float(lo_raw),
-        "ci_high": float(hi_raw),
-        "ci_low_disp": float(low_disp_raw),
-        "ci_high_disp": float(high_disp_raw),
-        "ci_mid_disp": float(mid_disp_raw),
+        **interval,
         "ci_label": "Int. 90% (bootstrap pré-fila)",
-        "ci_low_raw": float(lo_raw),
-        "ci_high_raw": float(hi_raw),
+        "ci_low_raw": float(interval.get("ci_low", np.nan)),
+        "ci_high_raw": float(interval.get("ci_high", np.nan)),
         "ci_low_raw_disp": None,
         "ci_high_raw_disp": None,
-        "ci_mid_raw_disp": float(mid_disp_raw),
+        "ci_mid_raw_disp": float(interval.get("ci_mid_disp", np.nan)) if interval else None,
         "ci_label_raw": None,
     }
 # =============================================================================
 # Referências e agrupamentos
 # =============================================================================
-
 def get_total_reference_values(fIndicadores: Optional[pd.DataFrame]) -> Dict[str, float]:
     """
     Retorna agregados (Base, ReceitaTotalMes) priorizando a linha Total (Estado=Total e Praça=Total),
@@ -2078,7 +1121,6 @@ def get_total_reference_values(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
     for col in ["BaseTotal", "ReceitaTotalMes"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-
     mask = pd.Series([True] * len(df))
     has_mask = False
     for col in ["Estado", "Praça", "Praca"]:
@@ -2095,16 +1137,13 @@ def get_total_reference_values(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
                     val = pd.to_numeric(row[col], errors="coerce")
                     if pd.notna(val):
                         refs[col] = float(val)
-
     if not refs:
         for col in ["BaseTotal", "ReceitaTotalMes"]:
             if col in df.columns:
                 total_val = pd.to_numeric(df[col], errors="coerce").sum(min_count=1)
                 if pd.notna(total_val) and total_val > 0:
                     refs[col] = float(total_val)
-
     return refs
-
 def estimate_cluster_indicators(
     fIndicadores: Optional[pd.DataFrame],
     feature_row: Optional[Dict[str, float]],
@@ -2122,7 +1161,6 @@ def estimate_cluster_indicators(
         or len(feature_row) == 0
     ):
         return {}
-
     default_features = [
         "BaseTotal",
         "BaseAtiva",
@@ -2147,12 +1185,10 @@ def estimate_cluster_indicators(
     ]
     cluster_features = cluster_features or default_features
     target_cols = target_cols or default_targets
-
     df = fIndicadores.copy()
     for col in set(cluster_features + target_cols):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-
     # remove linha Total agregada
     mask_total = pd.Series([True] * len(df))
     has_total = False
@@ -2162,27 +1198,22 @@ def estimate_cluster_indicators(
             has_total = True
     if has_total:
         df = df.loc[~mask_total]
-
     available_features = [c for c in cluster_features if c in df.columns]
     available_targets = [c for c in target_cols if c in df.columns]
     if len(available_features) == 0 or len(available_targets) == 0:
         return {}
-
     df = df.dropna(subset=available_features)
     if len(df) < 2:
         return {}
-
     n_clusters = min(4, len(df))
     if n_clusters < 2:
         return {}
-
     scaler = StandardScaler()
     X = scaler.fit_transform(df[available_features])
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     labels = kmeans.fit_predict(X)
     df["_cluster"] = labels
     cluster_stats = df.groupby("_cluster")[available_targets].mean()
-
     cluster_input = []
     for col in available_features:
         val = feature_row.get(col)
@@ -2190,20 +1221,16 @@ def estimate_cluster_indicators(
             val = df[col].median()
         cluster_input.append(float(val))
     cluster_label = int(kmeans.predict(scaler.transform([cluster_input]))[0])
-
     if cluster_label not in cluster_stats.index:
         return {}
-
     result = cluster_stats.loc[cluster_label].to_dict()
     result["cluster_id"] = cluster_label
     result["cluster_size"] = int((df["_cluster"] == cluster_label).sum())
     result["n_clusters"] = n_clusters
     return result
-
 # =============================================================================
 # Horas e dimensionamento
 # =============================================================================
-
 def infer_horas_loja_e_disp(row: pd.Series) -> Tuple[float, float]:
     """
     Extrai (horas_operacionais_loja, %disp em 0-1) a partir de uma linha da estrutura/pessoas.
@@ -2224,7 +1251,6 @@ def infer_horas_loja_e_disp(row: pd.Series) -> Tuple[float, float]:
         horas_loja = float(row["HorasOperacionais"])
     if horas_loja is None:
         horas_loja = 8.0  # fallback conservador
-
     disp = row.get("%disp", 1.0)
     try:
         disp = float(disp)
@@ -2233,9 +1259,7 @@ def infer_horas_loja_e_disp(row: pd.Series) -> Tuple[float, float]:
         disp = max(0.0, min(1.0, disp))
     except Exception:
         disp = 1.0
-
     return float(horas_loja), float(disp)
-
 def infer_dias_operacionais(row: Optional[pd.Series], fallback: float = 6.0) -> float:
     """Obtém o número de dias/semana operados pela loja."""
     if row is None or len(row) == 0:
@@ -2248,7 +1272,6 @@ def infer_dias_operacionais(row: Optional[pd.Series], fallback: float = 6.0) -> 
         return float(max(1.0, min(7.0, dias_val)))
     except Exception:
         return fallback
-
 def carga_total_horas_loja(
     tempos_processo: pd.DataFrame,
     frequencias: Optional[pd.DataFrame] = None,
@@ -2264,12 +1287,11 @@ def carga_total_horas_loja(
         fator_monotonia=fator_monotonia
     )
     return detalhe, float(carga)
-
 def calcular_qtd_aux_ideal(
     carga_total_horas: float,
     horas_por_colaborador: float,
-    margem_operacional: float = 0.10,
     ocupacao_alvo: float = DEFAULT_OCUPACAO_ALVO,
+    margem_operacional: float = 0.10,
     absenteismo: float = DEFAULT_ABSENTEISMO,
     sla_buffer: float = DEFAULT_SLA_BUFFER
 ) -> dict:
@@ -2280,13 +1302,11 @@ def calcular_qtd_aux_ideal(
       - absenteismo: 0–1 (ex.: 0.08)
       - sla_buffer: 0–1  folga p/ picos/SLA
       - margem_operacional: igual ao que você já usa (margem extra do botão)
-
     Fórmula: FTE = (carga / horas_por_colaborador) / ocupacao_alvo
              FTE *= (1 + absenteismo + sla_buffer + margem_operacional)
     """
     if horas_por_colaborador <= 0:
         raise ValueError("horas_por_colaborador deve ser > 0")
-
     fte_base = (carga_total_horas / horas_por_colaborador) / max(0.01, ocupacao_alvo)
     fte_ajust = fte_base * (1.0 + absenteismo + sla_buffer + margem_operacional)
     return {
@@ -2298,7 +1318,6 @@ def calcular_qtd_aux_ideal(
         "margem": float(margem_operacional),
         "qtd_aux_ideal": int(math.ceil(max(0.0, fte_ajust)))
     }
-
 def ideal_simplificado_por_fluxo(
     pedidos_hora: float,
     horas_operacionais_loja: float,
@@ -2338,11 +1357,9 @@ def ideal_simplificado_por_fluxo(
         "fator_monotonia": float(max(1.0, float(fator_monotonia))),
     })
     return resultado
-
 # =============================================================================
 # Carga e leitura de dados
 # =============================================================================
-
 def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
     # Carrega CSV com tentativas de codificação/sep e normaliza colunas
     """Carrega um CSV local testando encodings e delimitadores diferentes."""
@@ -2384,7 +1401,6 @@ def load_csv_path(path: str, schema: Dict[str, str]) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     df = _coerce_types(df, schema)
     return df
-
 @st.cache_data(show_spinner=False)    
 def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.DataFrame:
     # mapa de nomes → factories de schema
@@ -2398,7 +1414,6 @@ def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.Dat
     }
     schema_fn = schema_map[schema_name]
     return load_csv_path(path, schema_fn())
-
 def _load_with_version(path: str, schema_name: str) -> pd.DataFrame:
     """Empacota a leitura do CSV usando o mtime como chave de cache."""
     file_path = Path(path)
@@ -2407,11 +1422,9 @@ def _load_with_version(path: str, schema_name: str) -> pd.DataFrame:
     except FileNotFoundError:
         mtime = 0.0
     return _load_csv_cached(path, schema_name, mtime)
-
 # =============================================================================
 # Uploads e sessões do app
 # =============================================================================
-
 def apply_operacional_defaults_from_lookup(row: Dict[str, object]) -> None:
     """Atualiza valores padrão de dias/horas operacionais no session_state a partir de um lookup."""
     if not row:
@@ -2427,7 +1440,6 @@ def apply_operacional_defaults_from_lookup(row: Dict[str, object]) -> None:
         horas_semanais = horas_lookup * dias_ref if horas_lookup <= 24 else horas_lookup
         st.session_state["horas_loja_config"] = horas_semanais
         st.session_state["horas_operacionais_form"] = horas_semanais
-
 def append_and_dedup(base: pd.DataFrame, new: pd.DataFrame, subset_cols: List[str]) -> pd.DataFrame:
     """Acrescenta linhas e remove duplicidades com base em colunas chave."""
     if base is None or base.empty:
@@ -2439,12 +1451,10 @@ def append_and_dedup(base: pd.DataFrame, new: pd.DataFrame, subset_cols: List[st
     else:
         combined = combined.drop_duplicates(keep="last")
     return combined.reset_index(drop=True)
-
 def render_append(nome: str, schema_fn, subset_cols):
     """Renderiza o uploader incremental e aplica validação antes de anexar dados."""
     schema = schema_fn()
     up = st.file_uploader(f"Upload CSV para acrescentar em {nome}", type=["csv"], key=f"up_append_{nome}")
-
     if up is not None:
         df_up = read_csv_with_schema(up, schema)
         ok, errs = validate_df(df_up, schema)
@@ -2455,13 +1465,10 @@ def render_append(nome: str, schema_fn, subset_cols):
             st.success(f"{nome} atualizado. Linhas totais: {len(st.session_state[nome])}")
         else:
             st.error("; ".join(errs))
-
     st.dataframe(st.session_state[nome].tail(100), use_container_width=True)
-
 # =============================================================================
 # Cache de treinamento
 # =============================================================================
-
 @st.cache_resource(show_spinner=False)
 def _train_cached(train_df, mode: str, horas_disp: float, margem: float, cache_version: int = 7):
     """Mantém as versões treinadas (um por algoritmo) em cache."""
@@ -2475,31 +1482,17 @@ def _train_cached(train_df, mode: str, horas_disp: float, margem: float, cache_v
 # =============================================================================
 # Business logic extracted from app (Streamlit-free helpers)
 # =============================================================================
-
 # Movido de app.py: verifica se uma métrica calculada é válida para exibição.
 def _metric_has_value(val) -> bool:
     return val is not None and not (isinstance(val, float) and math.isnan(val))
-
-
 # Movido de app.py: formata os números dos intervalos de confiança exibidos no layout.
 def _format_interval_value(val: Optional[float]) -> str:
     if val is None or (isinstance(val, float) and not math.isfinite(val)):
         return "-"
     try:
-        num = float(val)
-        # Usa até 4 casas para evitar truncar intervalos estreitos; garante pelo menos 2
-        txt = f"{num:.4f}".rstrip("0").rstrip(".")
-        if "." not in txt:
-            txt = f"{txt}.00"
-        else:
-            dec = len(txt.split(".")[1])
-            if dec < 2:
-                txt = f"{txt}{'0' * (2 - dec)}"
-        return txt
+        return f"{float(val):.2f}"
     except (TypeError, ValueError):
         return str(val)
-
-
 # Movido de app.py: monta a string resumida com o diagnóstico da fila.
 def _format_queue_diag(diag: Optional[Dict[str, float]]) -> str:
     if not diag:
@@ -2521,8 +1514,6 @@ def _format_queue_diag(diag: Optional[Dict[str, float]]) -> str:
     if _metric_has_value(rho):
         parts.append(f"rho~{rho:.2f}")
     return " | ".join(parts)
-
-
 # Movido de app.py: consolida indicadores derivados e resultados de clusterização.
 def preparar_indicadores_operacionais(
     base_total: float,
@@ -2553,12 +1544,10 @@ def preparar_indicadores_operacionais(
     taxa_reativacao = calc_pct(recuperados, i4_a_i6)
     taxa_reinicio = calc_pct(reinicios, base_total if base_total > 0 else None)
     a0aA3 = a0 + a1aA3
-
     cluster_values = {target: 0.0 for target in cluster_targets}
     cluster_result: Optional[Dict[str, object]] = None
     cluster_used = False
     messages: List[Tuple[str, str]] = []
-
     if has_lookup and lookup_row:
         for target in cluster_targets:
             cluster_values[target] = safe_float(get_lookup(lookup_row, target), 0.0)
@@ -2600,7 +1589,6 @@ def preparar_indicadores_operacionais(
                     "Preencha os indicadores essenciais para estimar os indicadores operacionais por clusterização.",
                 )
             )
-
     return {
         "pct_base_total": pct_base_total,
         "pct_faturamento": pct_faturamento,
@@ -2614,8 +1602,6 @@ def preparar_indicadores_operacionais(
         "cluster_used": cluster_used,
         "messages": messages,
     }
-
-
 # Movido de app.py: monta o dicionário de features usado pelos modelos estatísticos.
 def montar_features_input(
     area_total: float,
@@ -2657,8 +1643,6 @@ def montar_features_input(
         "Faturamento/Hora": float(faturamento_hora),
         "%Retirada": float(pct_retirada),
     }
-
-
 # Movido de app.py: gera dicionários de tempo médio por processo com e sem filtro de loja.
 def preparar_dicionarios_tempos_processos(
     amostras_df: Optional[pd.DataFrame],
@@ -2668,22 +1652,17 @@ def preparar_dicionarios_tempos_processos(
     tempo_loja_dict: Dict[str, float] = {}
     if amostras_df is None:
         return tempo_global_dict, tempo_loja_dict
-
     tempo_global_df = agregar_tempo_medio_por_processo(amostras_df)
     if not tempo_global_df.empty:
         tempo_global_df["Processo_norm"] = tempo_global_df["Processo"].apply(normalize_processo_nome)
         tempo_global_dict = tempo_global_df.groupby("Processo_norm")["tempo_medio_min"].mean().to_dict()
-
     if loja_nome_alvo:
         amostras_loja_proc, _ = _filter_df_by_loja(amostras_df, loja_nome_alvo)
         tempo_loja_df = agregar_tempo_medio_por_processo(amostras_loja_proc)
         if not tempo_loja_df.empty:
             tempo_loja_df["Processo_norm"] = tempo_loja_df["Processo"].apply(normalize_processo_nome)
             tempo_loja_dict = tempo_loja_df.set_index("Processo_norm")["tempo_medio_min"].to_dict()
-
     return tempo_global_dict, tempo_loja_dict
-
-
 # Movido de app.py: estima frequências semanais por processo para o modo simulado.
 def calcular_freq_processos_simulacao(
     sim_pedidos_dia: float,
@@ -2709,7 +1688,6 @@ def calcular_freq_processos_simulacao(
         pedidos_semana_ui = pedidos_dia_hist * dias_operacionais
     elif pedidos_hora_hist > 0:
         pedidos_semana_ui = pedidos_hora_hist * max(horas_operacionais_semanais, 1.0)
-
     auto_freqs = estimate_process_frequencies_from_indicadores(
         base_total=base_total,
         base_ativa=base_ativa,
@@ -2723,8 +1701,6 @@ def calcular_freq_processos_simulacao(
         dias_operacionais=dias_operacionais,
     )
     return pedidos_semana_ui, auto_freqs
-
-
 # Movido de app.py: executa as previsões dos modelos treinados (CatBoost/XGBoost etc.).
 def gerar_resultados_modelos(
     model_bundle: Optional[Dict[str, object]],
@@ -2739,8 +1715,22 @@ def gerar_resultados_modelos(
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
     algo_sequence = algo_order or MODEL_ALGO_ORDER
     if not models:
-        return [], model_errors
-
+        # mesmo sem modelos carregados, retorne erros conhecidos na ordem esperada
+        resultados_stub = []
+        for key in algo_sequence:
+            if key in model_errors:
+                resultados_stub.append(
+                    {
+                        "key": key,
+                        "label": MODEL_ALGO_NAMES.get(key, key),
+                        "pred": None,
+                        "pred_display": None,
+                        "metrics": {},
+                        "queue_diag": {},
+                        "error": model_errors[key],
+                    }
+                )
+        return resultados_stub, model_errors
     metrics_map = evaluate_model_cv(
         train_df,
         n_splits=5,
@@ -2751,9 +1741,21 @@ def gerar_resultados_modelos(
     )
     resultados: List[Dict[str, object]] = []
     for key in algo_sequence:
-        if key not in models:
+        modelo_atual = models.get(key)
+        if modelo_atual is None:
+            if key in model_errors:
+                resultados.append(
+                    {
+                        "key": key,
+                        "label": MODEL_ALGO_NAMES.get(key, key),
+                        "pred": None,
+                        "pred_display": None,
+                        "metrics": {},
+                        "queue_diag": {},
+                        "error": model_errors[key],
+                    }
+                )
             continue
-        modelo_atual = models[key]
         try:
             pred, queue_diag = predict_qtd_auxiliares(
                 modelo_atual,
@@ -2763,7 +1765,6 @@ def gerar_resultados_modelos(
         except Exception as exc:
             model_errors[key] = f"Erro ao prever: {exc}"
             continue
-
         metrics = (metrics_map or {}).get(key, {}) if metrics_map else {}
         resultados.append(
             {
@@ -2776,8 +1777,6 @@ def gerar_resultados_modelos(
             }
         )
     return resultados, model_errors
-
-
 # Movido de app.py: calcula intervalos de confiança para cada algoritmo treinado.
 def calcular_intervalos_modelos(
     train_df: pd.DataFrame,
@@ -2804,8 +1803,6 @@ def calcular_intervalos_modelos(
         if ci:
             intervalos[key] = ci
     return intervalos
-
-
 # Movido de app.py: consolida horas e dias operacionais da loja para o modo ideal.
 def preparar_contexto_operacional(
     loja_nome_alvo: Optional[str],
@@ -2819,32 +1816,26 @@ def preparar_contexto_operacional(
     row_horas: Dict[str, object] = {}
     estrutura_row, estrutura_match = _get_loja_row(estrutura_df, loja_nome_alvo)
     pessoas_row, pessoas_match = _get_loja_row(pessoas_df, loja_nome_alvo)
-
     if estrutura_row:
         row_horas.update(estrutura_row)
     if pessoas_row and "%disp" in pessoas_row:
         row_horas["%disp"] = pessoas_row["%disp"]
-
     if manual_horas_form > 0:
         if manual_horas_form <= 24:
             horas_diarias_manual = manual_horas_form
         else:
             horas_diarias_manual = manual_horas_form / max(1, dias_operacionais_ativos)
         row_horas["HorasOperacionais"] = horas_diarias_manual
-
     has_row_data = bool(row_horas)
     if loja_nome_alvo:
         use_loja_dados = bool(estrutura_match or pessoas_match)
     else:
         use_loja_dados = has_row_data
-
     row_horas["DiasOperacionais"] = dias_operacionais_em_uso
-
     horas_loja_manual = float(horas_loja_config)
     if horas_loja_manual <= 24:
         horas_loja_manual = horas_loja_manual * dias_operacionais_ativos
     horas_loja = max(float(dias_operacionais_ativos), min(24.0 * dias_operacionais_ativos, horas_loja_manual))
-
     dias_operacionais_final = dias_operacionais_ativos
     if use_loja_dados and row_horas:
         row_series = pd.Series(row_horas)
@@ -2858,14 +1849,10 @@ def preparar_contexto_operacional(
         if horas_raw <= 24:
             horas_raw = horas_raw * dias_operacionais_final
         horas_loja = horas_raw
-
     if horas_loja <= 0:
         horas_loja = horas_loja_manual
     horas_loja = max(float(dias_operacionais_final), min(24.0 * dias_operacionais_final, horas_loja))
-
     return float(horas_loja), int(dias_operacionais_final)
-
-
 # Movido de app.py: avalia a carga por processos antes do cálculo ideal.
 def avaliar_carga_operacional_ideal(
     amostras_df: Optional[pd.DataFrame],
@@ -2918,15 +1905,12 @@ def avaliar_carga_operacional_ideal(
             absenteismo=absenteismo,
             sla_buffer=sla_buffer,
         )
-
     return {
         "detalhe": detalhe,
         "carga_total_diaria": carga_total_diaria,
         "carga_total": carga_total,
         "fallback": fallback,
     }
-
-
 # Movido de app.py: executa o modo Ideal (Simplificado) completo.
 def calcular_resultado_ideal_simplificado(
     cluster_values: Dict[str, float],
@@ -2959,7 +1943,6 @@ def calcular_resultado_ideal_simplificado(
     sim_faturamento_hora = safe_float(sim_inputs.get("faturamento_hora"), 0.0)
     sim_pct_retirada = safe_float(sim_inputs.get("pct_retirada"), pct_retirada_hist)
     sim_itens_pedido = safe_float(sim_inputs.get("itens_pedido"), itens_pedido_hist)
-
     ticket_medio_ref = 0.0
     cluster_pedidos_hora = safe_float(cluster_values.get("Pedidos/Hora"), 0.0)
     cluster_faturamento_hora = safe_float(cluster_values.get("Faturamento/Hora"), 0.0)
@@ -2970,14 +1953,12 @@ def calcular_resultado_ideal_simplificado(
         faturamento_semana = cluster_faturamento_hora * max(horas_loja, 1.0)
         pedidos_semana = cluster_pedidos_dia * dias_operacionais_ativos
         ticket_medio_ref = faturamento_semana / max(pedidos_semana, 1e-6)
-
     pedidos_hora_manual = 0.0
     if sim_pedidos_dia > 0 and horas_loja > 0:
         pedidos_semana = sim_pedidos_dia * dias_operacionais_ativos
         pedidos_hora_manual = pedidos_semana / max(horas_loja, 1.0)
     elif sim_faturamento_hora > 0 and ticket_medio_ref > 0:
         pedidos_hora_manual = sim_faturamento_hora / ticket_medio_ref
-
     pedidos_hora_sim_aj = estimate_pedidos_por_hora(
         cluster_values,
         horas_loja,
@@ -2995,7 +1976,6 @@ def calcular_resultado_ideal_simplificado(
     )
     indicador_pedidos_hora = fluxo_indicadores.get("pedidos_hora", 0.0)
     indicador_pedidos_semana = fluxo_indicadores.get("pedidos_semana", 0.0)
-
     candidatos_fluxo: List[Tuple[float, float]] = []
     if pedidos_hora_manual > 0:
         candidatos_fluxo.append((pedidos_hora_manual, 1.3))
@@ -3012,18 +1992,15 @@ def calcular_resultado_ideal_simplificado(
         pedidos_hora_final = pedidos_hora_sim_aj
     if pedidos_hora_final <= 0:
         pedidos_hora_final = pedidos_hora_sim_aj
-
     pedidos_semana_estimado = pedidos_hora_final * max(horas_loja, 1.0)
     if indicador_pedidos_semana > 0:
         if pedidos_semana_estimado <= 0:
             pedidos_semana_estimado = indicador_pedidos_semana
         else:
             pedidos_semana_estimado = 0.5 * pedidos_semana_estimado + 0.5 * indicador_pedidos_semana
-
     itens_ref = sim_itens_pedido if sim_itens_pedido > 0 else itens_pedido_hist
     itens_ajuste = 1.0 + 0.03 * ((max(itens_ref, 1.0) - 3.0) / 3.0)
     itens_ajuste = max(0.7, min(1.3, itens_ajuste))
-
     tmedio_base = sim_tmedio if sim_tmedio > 0 else safe_float(sim_inputs.get("tmedio_min_atend"), 0.0)
     tmedio_utilizado = tmedio_base * itens_ajuste
     result_fluxo = ideal_simplificado_por_fluxo(
@@ -3037,7 +2014,6 @@ def calcular_resultado_ideal_simplificado(
         absenteismo=absenteismo,
         sla_buffer=sla_buffer,
     )
-
     area_ref = 250.0
     caixas_ref = 4.0
     estrutura_multiplier = 1.0
@@ -3047,7 +2023,6 @@ def calcular_resultado_ideal_simplificado(
         estrutura_multiplier += min(0.1, (qtd_caixas / max(caixas_ref, 1.0)) * 0.05)
     estrutura_multiplier += 0.02 * sum(int(flag) for flag in estrutura_flags.values())
     estrutura_multiplier = max(0.8, min(1.5, estrutura_multiplier))
-
     pct_retirada_ref = sim_pct_retirada if sim_pct_retirada > 0 else pct_retirada_hist
     faturamento_ref = sim_faturamento_hora if sim_faturamento_hora > 0 else faturamento_hora_hist
     demand_multiplier = 1.0
@@ -3056,7 +2031,6 @@ def calcular_resultado_ideal_simplificado(
     if faturamento_ref > 0:
         demand_multiplier += 0.02 * ((faturamento_ref / 800.0) - 1.0)
     demand_multiplier = max(0.75, min(1.6, demand_multiplier))
-
     carga_fluxo_ajustada = result_fluxo["carga_total_horas"] * estrutura_multiplier * demand_multiplier
     carga_processos_extra = 0.0
     for proc_norm, freq_semana in processos_freq_dict.items():
@@ -3067,7 +2041,6 @@ def calcular_resultado_ideal_simplificado(
             continue
         carga_processos_extra += (freq_semana * tempo_proc) / 60.0
     carga_processos_extra *= max(1.0, float(fator_monotonia))
-
     carga_total_semana = carga_fluxo_ajustada + carga_processos_extra
     horas_por_colab_base = max(1.0, horas_por_colab)
     horas_por_colab_disp = horas_por_colab_base * max(0.1, (1.0 - absenteismo))
@@ -3076,7 +2049,6 @@ def calcular_resultado_ideal_simplificado(
     carga_por_colab = horas_por_colab_disp * max(0.01, ocupacao_alvo)
     qtd_aux_base = carga_total_semana / max(0.1, carga_por_colab)
     qtd_aux_ajust = qtd_aux_base * (1.0 + margem + sla_buffer)
-
     result_fluxo_clean = dict(result_fluxo)
     result_fluxo_clean.pop("qtd_aux_ideal", None)
     result_ideal = {
