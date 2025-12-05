@@ -100,31 +100,10 @@ def agregar_tempo_medio_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
     return grouped
 def inferir_frequencia_por_processo(amostras: pd.DataFrame) -> pd.DataFrame:
     """
-    Cria uma tabela de frequências por (Loja, Processo) a partir de dAmostras.
-    Usa a coluna 'Numero de Amostras' (ou equivalentes) se existir; caso contrário,
-    usa a contagem/número de amostras coletadas como proxy.
+    Deprecated: frequência não é inferida de dAmostras.
+    Mantém compatibilidade retornando DataFrame vazio.
     """
-    if amostras is None or amostras.empty:
-        return pd.DataFrame(columns=["Loja", "Processo", "frequencia"])
-    df = amostras.copy()
-    freq_col = None
-    for col in df.columns:
-        norm = str(col).strip().lower()
-        if "numero" in norm and "amostra" in norm:
-            freq_col = col
-            break
-    group_cols = ["Loja", "Processo"]
-    if freq_col:
-        freq_df = df.groupby(group_cols, dropna=False)[freq_col].max().reset_index()
-        freq_df = freq_df.rename(columns={freq_col: "frequencia"})
-    else:
-        target_col = "Amostra" if "Amostra" in df.columns else None
-        if target_col:
-            freq_df = df.groupby(group_cols, dropna=False)[target_col].nunique().reset_index(name="frequencia")
-        else:
-            freq_df = df.groupby(group_cols, dropna=False).size().reset_index(name="frequencia")
-    freq_df["frequencia"] = pd.to_numeric(freq_df["frequencia"], errors="coerce").fillna(0)
-    return freq_df
+    return pd.DataFrame(columns=["Loja", "Processo", "frequencia"])
 def calcular_carga_por_processo(tempos_processo: pd.DataFrame, frequencias: pd.DataFrame, fator_monotonia: float = 1.0) -> Tuple[pd.DataFrame, float]:
     """
     Junta tempos por processo (Loja, Processo, tempo_medio_min) com frequências (Loja, Processo, frequencia)
@@ -1881,7 +1860,7 @@ def avaliar_carga_operacional_ideal(
 ) -> Dict[str, object]:
     amostras_loja, _ = _filter_df_by_loja(amostras_df, loja_nome_alvo)
     tempos = agregar_tempo_medio_por_processo(amostras_loja)
-    freq_df = inferir_frequencia_por_processo(amostras_loja)
+    freq_df = pd.DataFrame(columns=["Processo", "frequencia"])
     detalhe, carga_total_diaria = carga_total_horas_loja(
         tempos_processo=tempos,
         frequencias=freq_df,
