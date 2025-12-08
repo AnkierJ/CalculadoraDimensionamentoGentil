@@ -51,7 +51,6 @@ tab_calc, tab_fila, tab_dados = st.tabs(["Cálculo", "Teoria das filas", "Dados 
 
 with tab_calc:
     render_calc_tab(tab_calc)
-    render_diag_cache(tab_calc)
 
 with tab_fila:
     render_fila_tab(tab_fila)

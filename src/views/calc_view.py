@@ -14,7 +14,6 @@ from src.logic.core.logic import (
     _metric_has_value,
     _train_cached,
     avaliar_carga_operacional_ideal,
-    calcular_freq_processos_simulacao,
     calcular_intervalos_modelos,
     calcular_resultado_ideal_simplificado,
     clean_training_dataframe,
@@ -599,45 +598,53 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.session_state["sim_processos_tempos_global"] = tempo_global_dict
                 st.session_state["sim_processos_tempos_loja"] = tempo_loja_dict
 
-                pedidos_semana_ui, auto_freqs = calcular_freq_processos_simulacao(
-                    sim_pedidos_dia,
-                    pedidos_dia,
-                    pedidos_hora,
-                    horas_operacionais_semanais,
-                    dias_operacionais_em_uso,
-                    base_total,
-                    base_ativa,
-                    atividade_er,
-                    recuperados,
-                    inicios,
-                    reinicios,
-                    itens_pedido,
-                    pct_retirada,
-                    sim_itens_pedido,
-                    sim_pct_retirada,
-                )
+                # Não inferimos frequências automaticamente no modo simplificado; o usuário preenche todas.
+                auto_freqs: Dict[str, float] = {}
                 sim_processos_freq_state = st.session_state.get("sim_processos_freq", {}) or {}
-                with st.expander("Processos complementares (freq. semanal)"):
-                    st.caption("Informe quantas vezes por semana cada processo ocorre. Os tempos médios vêm da base dAmostras.")
+                sim_processos_tempo_state = st.session_state.get("sim_processos_tempos_custom", {}) or {}
+                with st.expander("Processos complementares (tempos e frequências)"):
+                    st.caption(
+                        "Tempos médios puxados de dAmostras (loja ou média geral), mas editáveis para simulação. "
+                        "Frequências em ocorrências por semana."
+                    )
                     updated_freqs: Dict[str, float] = {}
+                    updated_tempos: Dict[str, float] = {}
                     for proc in PROCESSOS_PRIORITARIOS:
                         proc_norm = normalize_processo_nome(proc)
-                        tempo_proc = tempo_loja_dict.get(proc_norm) or tempo_global_dict.get(proc_norm)
+                        tempo_default = sim_processos_tempo_state.get(proc_norm)
+                        usa_media_geral = proc_norm not in tempo_loja_dict and proc_norm in tempo_global_dict
+                        if tempo_default is None or tempo_default < 0:
+                            tempo_default = tempo_loja_dict.get(proc_norm) or tempo_global_dict.get(proc_norm) or 0.0
                         freq_default = sim_processos_freq_state.get(proc_norm)
                         if freq_default is None or freq_default <= 0:
                             freq_default = auto_freqs.get(proc_norm, 0.0)
-                        freq_val = st.number_input(
-                            f"{proc.strip()} – freq/semana",
-                            min_value=0.0,
-                            step=1.0,
-                            value=freq_default,
-                            key=f"sim_proc_freq_{proc_norm}",
-                        )
+                        with st.container():
+                            fallback_label = " _(média geral)_" if usa_media_geral else ""
+                            st.markdown(f"**{proc.strip()}**{fallback_label}")
+                            col_tempo, col_freq = st.columns(2)
+                            with col_tempo:
+                                tempo_val = st.number_input(
+                                    "Tempo médio (min)",
+                                    min_value=0.0,
+                                    step=0.5,
+                                    value=float(tempo_default),
+                                    format="%.2f",
+                                    key=f"sim_proc_tempo_{proc_norm}",
+                                )
+                            with col_freq:
+                                freq_val = st.number_input(
+                                    "Freq/semana",
+                                    min_value=0.0,
+                                    step=1.0,
+                                    value=float(freq_default),
+                                    format="%.1f",
+                                    key=f"sim_proc_freq_{proc_norm}",
+                                )
+                            if usa_media_geral:
+                                st.caption("Tempo vindo da média geral das lojas (sem dado específico da loja).")
+                        updated_tempos[proc_norm] = tempo_val
                         updated_freqs[proc_norm] = freq_val
-                        if tempo_proc:
-                            st.caption(f"Tempo médio estimado: {tempo_proc:.1f} min")
-                        else:
-                            st.caption("Tempo médio não disponível nas amostras atuais.")
+                st.session_state["sim_processos_tempos_custom"] = updated_tempos
                 st.session_state["sim_processos_freq"] = updated_freqs
                 st.session_state["sim_processos_auto_freq"] = auto_freqs
 
@@ -977,6 +984,18 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             processos_freq_dict = st.session_state.get("sim_processos_freq", {}) or {}
             tempo_loja_dict = st.session_state.get("sim_processos_tempos_loja", {}) or {}
             tempo_global_dict = st.session_state.get("sim_processos_tempos_global", {}) or {}
+            tempo_custom_dict = st.session_state.get("sim_processos_tempos_custom", {}) or {}
+            if tempo_custom_dict:
+                tempo_loja_dict = dict(tempo_loja_dict)
+                tempo_global_dict = dict(tempo_global_dict)
+                for proc_norm, tempo_val in tempo_custom_dict.items():
+                    try:
+                        tempo_float = float(tempo_val)
+                    except Exception:
+                        continue
+                    tempo_float = max(0.0, tempo_float)
+                    tempo_loja_dict[proc_norm] = tempo_float
+                    tempo_global_dict[proc_norm] = tempo_float
             estrutura_flags = {"Escritorio": int(escritorio), "Copa": int(copa), "Espaco Evento": int(espaco_evento)}
             result_ideal = calcular_resultado_ideal_simplificado(
                 cluster_values=cluster_values,
@@ -1039,14 +1058,31 @@ from src.logic.models.model_fila import (
 
 
 PROCESSOS_PRIORITARIOS = [
-    "Reposição de prateleira (estoque)",
-    "Separação de mercadoria (on-line e retirada)",
-    "Faturamente de pedido (retirada e delivery)",
     "Devolução",
-    "Cadastro de revendedor",
-    "Atualização de cadastro de revendedor",
+    "Reposição de prateleira",
+    "Produção de flyer",
     "Abertura e acompanhamento de chamado",
+    "Ação de VPs/Excesso",
+    "Criação de conteúdo",
+    "Elaboração de calendário do ciclo e divulgação",
+    "Encontro de ciclo",
     "Eventos para os revendedores",
+    "Unibê",
+    "Limpeza da ER",
+    "Limpeza das salas e Copa",
+    "Limpeza dos banheiros",
+    "Mudança de planograma",
+    "Fechamento de caixa",
+    "Atualização de cadastro de revendedor",
+    "Cadastro de revendedor",
+    "Digitalização de boletos",
+    "Faturamente de pedido (retirada e delivery)",
+    "Separação de mercadoria (on-line e retirada)",
+    "Venda em caixa",
+    "Atendimento ao cliente",
+    "Prospecção de revendedor (Início)",
+    "Atendimento online",
+    "Ativações on-line",
 ]
 
 
