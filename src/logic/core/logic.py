@@ -1324,6 +1324,154 @@ def estimate_cluster_indicators(
     result["n_clusters"] = n_clusters
     return result
 # =============================================================================
+# ClusterizaÇõÇœo por porte (peso para previsÇœo de QtdAux)
+# =============================================================================
+def _compute_porte_cluster_context(
+    train_df: pd.DataFrame,
+    mode: str,
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: Optional[float],
+) -> Optional[Dict[str, object]]:
+    """Cria contexto de clusterizaÇõÇœo por porte para reponderar previsÇœes de QtdAux."""
+    if train_df is None or train_df.empty:
+        return None
+    feature_cols = [
+        "Area Total",
+        "BaseTotal",
+        "BaseAtiva",
+        "ReceitaTotalMes",
+        "Faturamento/Hora",
+    ]
+    available = [c for c in feature_cols if c in train_df.columns]
+    if len(available) < 2:
+        return None
+    df_feat = train_df[available].apply(pd.to_numeric, errors="coerce")
+    target = make_target(train_df, mode=mode, horas_disp=horas_disp, margem=margem, anchor_quantile=anchor_quantile)
+    target = pd.to_numeric(target, errors="coerce")
+    aligned_idx = target.dropna().index
+    df_feat = df_feat.loc[aligned_idx]
+    target = target.loc[aligned_idx]
+    if df_feat.empty or target.empty:
+        return None
+    df_feat_filled = df_feat.copy()
+    medians = df_feat_filled.median(numeric_only=True)
+    for col in df_feat_filled.columns:
+        df_feat_filled[col] = df_feat_filled[col].fillna(medians.get(col, 0.0))
+    n_clusters = min(4, len(df_feat_filled))
+    if n_clusters < 2:
+        return None
+    scaler = StandardScaler()
+    X = scaler.fit_transform(df_feat_filled)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(X)
+    cluster_stats = pd.Series(target.values, index=labels).groupby(level=0).median()
+    cluster_sizes = pd.Series(1, index=labels).groupby(level=0).sum()
+    porte_map: Dict[int, int] = {}
+    # Rankea clusters pelo headcount mediano (maior = porte 1)
+    ordered = sorted(cluster_stats.items(), key=lambda kv: kv[1], reverse=True)
+    for rank, (cid, _) in enumerate(ordered, start=1):
+        porte_map[int(cid)] = int(rank)
+    thresholds = {}
+    for col in ["Area Total", "BaseTotal", "ReceitaTotalMes"]:
+        if col in df_feat.columns:
+            thr = df_feat[col].quantile(0.75)
+            if pd.notna(thr) and thr > 0:
+                thresholds[col] = float(thr)
+    return {
+        "model": kmeans,
+        "scaler": scaler,
+        "feature_cols": available,
+        "feature_medians": medians.to_dict(),
+        "cluster_stats": cluster_stats.to_dict(),
+        "cluster_sizes": cluster_sizes.to_dict(),
+        "porte_map": porte_map,
+        "thresholds": thresholds,
+        "global_median": float(target.median(skipna=True)),
+    }
+def _is_loja_grande(feature_row: Dict[str, object], thresholds: Dict[str, float]) -> bool:
+    """Classifica loja como grande usando quantil 75% de porte (área/base/receita)."""
+    for col, thr in thresholds.items():
+        try:
+            val = float(feature_row.get(col, 0.0))
+        except Exception:
+            continue
+        if math.isfinite(val) and val >= thr:
+            return True
+    return False
+def _assign_porte_cluster(feature_row: Dict[str, object], ctx: Dict[str, object]) -> Tuple[Optional[int], Optional[float], int]:
+    """Atribui cluster de porte e retorna (cluster_id, valor_medio_cluster, tamanho_cluster)."""
+    model = ctx.get("model")
+    scaler = ctx.get("scaler")
+    cols = ctx.get("feature_cols") or []
+    medians: Dict[str, float] = ctx.get("feature_medians", {}) or {}
+    if model is None or scaler is None or not cols:
+        return None, None, 0
+    vals: List[float] = []
+    for col in cols:
+        try:
+            val = float(feature_row.get(col, medians.get(col, 0.0)))
+            if not math.isfinite(val):
+                val = medians.get(col, 0.0)
+        except Exception:
+            val = medians.get(col, 0.0)
+        vals.append(float(val))
+    try:
+        df_feat = pd.DataFrame([vals], columns=cols)
+        label = int(model.predict(scaler.transform(df_feat))[0])
+    except Exception:
+        return None, None, 0
+    cluster_stats: Dict[int, float] = ctx.get("cluster_stats", {}) or {}
+    cluster_sizes: Dict[int, int] = ctx.get("cluster_sizes", {}) or {}
+    cluster_pred = cluster_stats.get(label)
+    cluster_size = int(cluster_sizes.get(label, 0) or 0)
+    return label, cluster_pred, cluster_size
+def _blend_pred_with_cluster(
+    pred_val: float,
+    cluster_pred: Optional[float],
+    is_large: bool,
+    cluster_size: int,
+    global_median: float,
+) -> Tuple[float, float]:
+    """Aplica mistura com média do cluster; retorna (pred_ajust, peso_cluster)."""
+    if cluster_pred is None or not math.isfinite(cluster_pred):
+        cluster_pred = global_median
+    if cluster_pred is None or not math.isfinite(cluster_pred):
+        return float(pred_val), 0.0
+    peso = 0.35
+    if is_large:
+        peso = 0.60
+    if cluster_size and cluster_size <= 2:
+        peso *= 0.6
+    peso = max(0.0, min(0.8, float(peso)))
+    ajust = (float(pred_val) * (1.0 - peso)) + (float(cluster_pred) * peso)
+    return ajust, peso
+def _apply_cluster_blend(
+    feature_row: Dict[str, object],
+    pred_val: float,
+    cluster_ctx: Optional[Dict[str, object]],
+) -> Tuple[float, Optional[Dict[str, object]]]:
+    """Retorna previsÇœo ajustada pelo cluster de porte e metadados do ajuste."""
+    if cluster_ctx is None:
+        return float(pred_val), None
+    cluster_id, cluster_pred, cluster_size = _assign_porte_cluster(feature_row, cluster_ctx)
+    is_large = _is_loja_grande(feature_row, cluster_ctx.get("thresholds", {}))
+    ajust, peso = _blend_pred_with_cluster(
+        pred_val,
+        cluster_pred,
+        is_large,
+        cluster_size,
+        cluster_ctx.get("global_median", float(pred_val)),
+    )
+    info = {
+        "cluster_id": cluster_id,
+        "cluster_pred": cluster_pred,
+        "cluster_size": cluster_size,
+        "is_large": is_large,
+        "weight": peso,
+    }
+    return ajust, info
+# =============================================================================
 # Horas e dimensionamento
 # =============================================================================
 def infer_horas_loja_e_disp(row: pd.Series) -> Tuple[float, float]:
@@ -1844,6 +1992,7 @@ def gerar_resultados_modelos(
     algo_sequence = algo_order or MODEL_ALGO_ORDER
     feature_bounds = _feature_bounds_from_train(train_df)
     capped_features = _cap_feature_row(features_input, feature_bounds)
+    cluster_ctx = _compute_porte_cluster_context(train_df, mode=ref_mode, horas_disp=horas_disp, margem=margem, anchor_quantile=anchor_quantile)
     if not models:
         # mesmo sem modelos carregados, retorne erros conhecidos na ordem esperada
         resultados_stub = []
@@ -1896,15 +2045,18 @@ def gerar_resultados_modelos(
         except Exception as exc:
             model_errors[key] = f"Erro ao prever: {exc}"
             continue
+        pred_ajust, cluster_info = _apply_cluster_blend(capped_features, pred, cluster_ctx)
         metrics = (metrics_map or {}).get(key, {}) if metrics_map else {}
         resultados.append(
             {
                 "key": key,
                 "label": MODEL_ALGO_NAMES.get(key, key),
-                "pred": pred,
-                "pred_display": max(1.0, round(float(pred), 2)),
+                "pred": pred_ajust,
+                "pred_raw": pred,
+                "pred_display": max(1.0, round(float(pred_ajust), 2)),
                 "metrics": metrics or {},
                 "queue_diag": queue_diag or {},
+                "cluster_adjust": cluster_info or {},
             }
         )
     return resultados, model_errors
@@ -1923,6 +2075,7 @@ def calcular_intervalos_modelos(
     intervalos: Dict[str, Dict[str, float]] = {}
     feature_bounds = _feature_bounds_from_train(train_df)
     capped_features = _cap_feature_row(features_input, feature_bounds)
+    cluster_ctx = _compute_porte_cluster_context(train_df, mode=ref_mode, horas_disp=horas_disp, margem=margem, anchor_quantile=anchor_quantile)
     for key in algo_keys:
         ci = predict_with_uncertainty(
             train_df,
@@ -1935,6 +2088,19 @@ def calcular_intervalos_modelos(
             anchor_quantile=anchor_quantile,
             algo=key,
         )
+        if ci and cluster_ctx is not None:
+            pred_base = ci.get("pred_mean", ci.get("ci_mid_disp"))
+            pred_base = pred_base if pred_base is not None else 0.0
+            pred_adj, info = _apply_cluster_blend(capped_features, pred_base, cluster_ctx)
+            peso = (info or {}).get("weight", 0.0)
+            cluster_pred = (info or {}).get("cluster_pred", pred_base)
+            if info:
+                ci["cluster_adjust"] = info
+            if cluster_pred is not None and math.isfinite(peso) and peso > 0:
+                for field in ["ci_low", "ci_high", "ci_mid_disp", "ci_low_disp", "ci_high_disp", "pred_mean"]:
+                    if field in ci and ci[field] is not None and math.isfinite(ci[field]):
+                        ci[field] = (float(ci[field]) * (1.0 - peso)) + (float(cluster_pred) * peso)
+                ci["pred_mean"] = float(pred_adj)
         if ci:
             intervalos[key] = ci
     return intervalos

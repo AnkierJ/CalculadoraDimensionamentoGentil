@@ -734,6 +734,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 mape_v = metrics_info.get("MAPE")
                 warnings_info = metrics_info.get("warnings")
                 queue_diag = res.get("queue_diag")
+                cluster_info = res.get("cluster_adjust") or {}
                 pred_raw = float(res.get("pred") or 0.0)
                 def _ajustar_pred(pred_val: float) -> tuple[float, Dict[str, float]]:
                     # Ajusta somente a diferença em relação ao baseline (absenteísmo/folga pré-preenchidos).
@@ -770,6 +771,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         detail_parts.append(f"MAPE {mape_v*100:.1f}%")
                     if detail_parts:
                         caption_lines.append(" | ".join(detail_parts))
+                    if cluster_info and cluster_info.get("cluster_pred") is not None:
+                        cid = cluster_info.get("cluster_id")
+                        peso = float(cluster_info.get("weight", 0.0) or 0.0)
+                        cluster_pred = float(cluster_info.get("cluster_pred", 0.0) or 0.0)
+                        cluster_size = cluster_info.get("cluster_size", "?")
+                        cid_label = f"c{cid + 1}" if cid is not None else "c?"
+                        caption_lines.append(
+                            f"Cluster porte {cid_label}: {cluster_pred:.2f} (peso {peso:.2f}, n={cluster_size})"
+                        )
                     for text_line in caption_lines:
                         st.caption(text_line)
                     if warnings_info:
@@ -885,6 +895,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     mape_v = metrics_info.get("MAPE")
                     warnings_info = metrics_info.get("warnings")
                     queue_diag = res.get("queue_diag")
+                    cluster_info = res.get("cluster_adjust") or {}
                     pred_raw = float(res.get("pred") or 0.0)
                     def _ajustar_pred_ideal(pred_val: float) -> tuple[float, Dict[str, float]]:
                         base_abs = float(absenteismo_prefill)
@@ -920,6 +931,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             detail_parts.append(f"MAPE {mape_v*100:.1f}%")
                         if detail_parts:
                             caption_lines.append(" | ".join(detail_parts))
+                        if cluster_info and cluster_info.get("cluster_pred") is not None:
+                            cid = cluster_info.get("cluster_id")
+                            peso = float(cluster_info.get("weight", 0.0) or 0.0)
+                            cluster_pred = float(cluster_info.get("cluster_pred", 0.0) or 0.0)
+                            cluster_size = cluster_info.get("cluster_size", "?")
+                            cid_label = f"c{cid + 1}" if cid is not None else "c?"
+                            caption_lines.append(
+                                f"Cluster porte {cid_label}: {cluster_pred:.2f} (peso {peso:.2f}, n={cluster_size})"
+                            )
                         for text_line in caption_lines:
                             st.caption(text_line)
                         if warnings_info:
