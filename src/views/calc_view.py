@@ -1052,7 +1052,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
             )
  
-        # Comparativo automÇático das 20 primeiras lojas (HistÇürico vs Ideal)
+        # Comparativo automÇático das 35 primeiras lojas (HistÇürico vs Ideal)
         if modo_calc in ("Ideal (Machine Learning)", "Ideal (Simplificado)") and not train_df.empty:
             estrutura_df = st.session_state.get("dEstrutura")
             if estrutura_df is not None and not estrutura_df.empty:
@@ -1061,7 +1061,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     train_norm = _ensure_loja_key(train_df)
                     if "Loja" not in estrutura_norm.columns:
                         raise KeyError("Coluna 'Loja' não encontrada na base de estrutura.")
-                    lojas_top = estrutura_norm["Loja"].astype(str).head(20).tolist()
+                    lojas_top = estrutura_norm["Loja"].astype(str).head(35).tolist()
                     model_hist = _train_cached(train_df, "historico", horas_disp, margem)
                     model_ideal = _train_cached(train_df, "ideal", horas_disp, margem)
 
@@ -1096,11 +1096,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         qtd_ideal = _pred_for_loja(model_ideal, feature_row, "ideal")
                         if qtd_hist is None:
                             qtd_hist = safe_float(feature_row.get("QtdAux"))
+                        delta_ideal = None
+                        if qtd_ideal is not None and qtd_hist is not None:
+                            delta_ideal = float(qtd_ideal) - float(qtd_hist)
                         linhas_comp.append(
                             {
                                 "Loja": loja_display,
                                 "QtdAux Histórico": qtd_hist,
                                 "QtdAux Ideal": qtd_ideal,
+                                "QtdIdeal - QtdHistorico": delta_ideal,
                             }
                         )
                     if linhas_comp:
