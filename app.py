@@ -4,6 +4,7 @@ from pathlib import Path
 from src.logic.core.logic import _load_with_version
 from src.logic.utils.helpers import _standardize_cols
 from src.views.calc_view import render_calc_tab
+from src.views.comparativo_view import render_comparativo_tab
 from src.views.dados_view import render_dados_tab
 from src.views.diagnostics_view import render_diag_cache
 from src.views.fila_view import render_fila_tab
@@ -47,10 +48,13 @@ render_tutorial()
 st.session_state["fIndicadores"] = _standardize_cols(st.session_state["fIndicadores"])
 
 # Tabs principais
-tab_calc, tab_fila, tab_dados = st.tabs(["Cálculo", "Teoria das filas", "Dados de base"])
+tab_calc, tab_comp, tab_fila, tab_dados = st.tabs(["Cálculo", "Comparativo", "Teoria das filas", "Dados de base"])
 
 with tab_calc:
     render_calc_tab(tab_calc)
+
+with tab_comp:
+    render_comparativo_tab(tab_comp)
 
 with tab_fila:
     render_fila_tab(tab_fila)

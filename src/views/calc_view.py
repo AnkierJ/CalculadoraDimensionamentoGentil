@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from src.logic.data.buscaDeLojas import _get_loja_row, _ensure_loja_key
+from src.logic.data.buscaDeLojas import _get_loja_row
 from src.logic.core.logic import (
     DEFAULT_OCUPACAO_ALVO,
     DEFAULT_ABSENTEISMO,
@@ -649,17 +649,28 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.session_state["sim_processos_tempos_custom"] = updated_tempos
                 st.session_state["sim_processos_freq"] = updated_freqs
                 st.session_state["sim_processos_auto_freq"] = auto_freqs
-
-            col1, col2 = st.columns([2, 1])
+ 
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
-                submitted = st.form_submit_button(
-                    "Calcular Qtd Auxiliares",
+                anchor_percent = st.select_slider(
+                    "Âncora receita/aux (%)",
+                    options=[50, 55, 60, 65, 70, 75, 80, 85, 90],
+                    value=int(st.session_state.get("anchor_rpa_percent", 60)),
+                    help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, percentil mais alto.",
+                )
+                st.session_state["anchor_rpa_percent"] = anchor_percent
+            st.session_state["anchor_rpa_quantile"] = float(anchor_percent) / 100.0
+        with col3:
+            st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
+            submitted = st.form_submit_button(
+                "Calcular Qtd Auxiliares",
                     type="primary",
                     use_container_width=True,
                 )
 
     dias_operacionais_ativos = int(st.session_state.get("dias_operacionais_loja_form", dias_operacionais_semana))
     dias_operacionais_ativos = max(1, min(7, dias_operacionais_ativos))
+    anchor_quantile = float(st.session_state.get("anchor_rpa_quantile", 0.60))
 
     if not submitted:
         return
@@ -682,11 +693,14 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
     model_bundle = None
     if modo_calc in ("Histórico (Machine Learning)", "Ideal (Machine Learning)"):
+        cache_ver = 9 + int(anchor_quantile * 100)
         model_bundle = _train_cached(
             train_df,
             ref_mode,
             horas_disp,
             margem,
+            anchor_quantile=anchor_quantile,
+            cache_version=cache_ver,
         )
 
     if modo_calc == "Histórico (Machine Learning)":
@@ -697,6 +711,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             ref_mode,
             horas_disp,
             margem,
+            anchor_quantile=anchor_quantile,
         )
         if not resultados_modelos:
             err_msgs = []
@@ -776,6 +791,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     horas_disp,
                     margem,
                     algo_keys,
+                    anchor_quantile=anchor_quantile,
                 )
             for res, placeholder in ci_placeholders:
                 ci = ci_map.get(res["key"])
@@ -846,6 +862,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 ref_mode,
                 horas_disp,
                 margem,
+                anchor_quantile=anchor_quantile,
             )
             if not resultados_modelos_ideal:
                 err_msgs = []
@@ -924,6 +941,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         horas_disp,
                         margem,
                         algo_keys_ideal,
+                        anchor_quantile=anchor_quantile,
                     )
                 for res, placeholder in ci_placeholders_ideal:
                     ci = ci_map_ideal.get(res["key"])
@@ -1051,69 +1069,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 f"Tempo médio: {result_ideal.get('tmedio_min_atendimento', 0.0):.2f} min | "
                 f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
             )
- 
-        # Comparativo automÇático das 35 primeiras lojas (HistÇürico vs Ideal)
-        if modo_calc in ("Ideal (Machine Learning)", "Ideal (Simplificado)") and not train_df.empty:
-            estrutura_df = st.session_state.get("dEstrutura")
-            if estrutura_df is not None and not estrutura_df.empty:
-                try:
-                    estrutura_norm = _ensure_loja_key(estrutura_df)
-                    train_norm = _ensure_loja_key(train_df)
-                    if "Loja" not in estrutura_norm.columns:
-                        raise KeyError("Coluna 'Loja' não encontrada na base de estrutura.")
-                    lojas_top = estrutura_norm["Loja"].astype(str).head(35).tolist()
-                    model_hist = _train_cached(train_df, "historico", horas_disp, margem)
-                    model_ideal = _train_cached(train_df, "ideal", horas_disp, margem)
-
-                    def _pred_for_loja(bundle, feature_row: Dict[str, object], ref_mode: str) -> Optional[float]:
-                        if bundle is None or not feature_row:
-                            return None
-                        resultados, _ = gerar_resultados_modelos(
-                            bundle,
-                            train_df,
-                            feature_row,
-                            ref_mode,
-                            horas_disp,
-                            margem,
-                        )
-                        preferidos = ("catboost", "xgboost")
-                        for key in preferidos:
-                            res = next((r for r in resultados if r.get("key") == key and r.get("pred") is not None), None)
-                            if res:
-                                return float(res.get("pred"))
-                        res_any = next((r for r in resultados if r.get("pred") is not None), None)
-                        if res_any:
-                            return float(res_any.get("pred"))
-                        return None
-
-                    linhas_comp: List[Dict[str, object]] = []
-                    for loja_nome in lojas_top:
-                        feature_row, _ = _get_loja_row(train_norm, loja_nome)
-                        if not feature_row:
-                            continue
-                        loja_display = str(feature_row.get("Loja", loja_nome)).strip() or loja_nome
-                        qtd_hist = _pred_for_loja(model_hist, feature_row, "historico")
-                        qtd_ideal = _pred_for_loja(model_ideal, feature_row, "ideal")
-                        if qtd_hist is None:
-                            qtd_hist = safe_float(feature_row.get("QtdAux"))
-                        delta_ideal = None
-                        if qtd_ideal is not None and qtd_hist is not None:
-                            delta_ideal = float(qtd_ideal) - float(qtd_hist)
-                        linhas_comp.append(
-                            {
-                                "Loja": loja_display,
-                                "QtdAux Histórico": qtd_hist,
-                                "QtdAux Ideal": qtd_ideal,
-                                "QtdIdeal - QtdHistorico": delta_ideal,
-                            }
-                        )
-                    if linhas_comp:
-                        tabela_comp = pd.DataFrame(linhas_comp)
-                        st.subheader("Comparativo automático (20 primeiras lojas)")
-                        st.dataframe(tabela_comp, use_container_width=True)
-                except Exception as exc:
-                    st.info(f"Não foi possível montar a tabela comparativa: {exc}")
-
 # Helpers internos
 from src.logic.models.model_fila import (
     estimate_queue_inputs,

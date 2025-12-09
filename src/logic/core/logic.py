@@ -566,6 +566,7 @@ def _prepare_model_data(
     mode: str,
     horas_disp: float,
     margem: float,
+    anchor_quantile: Optional[float] = None,
 ) -> Optional[Tuple[pd.DataFrame, pd.Series, List[str], pd.Series]]:
     """
     Prepara matriz de atributos (X) e target (y) para uso pelos modelos de regressão.
@@ -580,7 +581,13 @@ def _prepare_model_data(
         return None
     used_features = drop_high_correlation(train_df, used_features, thr=0.85)
     X = train_df[used_features].copy()
-    y = make_target(train_df, mode=mode, horas_disp=horas_disp, margem=margem)
+    y = make_target(
+        train_df,
+        mode=mode,
+        horas_disp=horas_disp,
+        margem=margem,
+        anchor_quantile=anchor_quantile,
+    )
     y = pd.to_numeric(y, errors="coerce")
     mask_valid = y.notna()
     X, y = X.loc[mask_valid], y.loc[mask_valid]
@@ -694,10 +701,11 @@ def train_auxiliares_model(
     margem: float = 0.15,
     algo: str = "xgboost",
     prepared: Optional[Tuple[pd.DataFrame, pd.Series, List[str], pd.Series]] = None,
+    anchor_quantile: Optional[float] = None,
 ) -> Optional[object]:
     """Treina o modelo solicitado (CatBoost ou XGBoost) usando pipelines padronizados."""
     if prepared is None:
-        prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
+        prepared = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared is None:
         return None
     X_full, y_full, used_features, sample_weights = prepared
@@ -781,12 +789,13 @@ def train_all_auxiliares_models(
     horas_disp: float = 6.0,
     margem: float = 0.15,
     algos: Optional[List[str]] = None,
+    anchor_quantile: Optional[float] = None,
 ) -> Tuple[Dict[str, object], Dict[str, str]]:
     """Treina todos os modelos disponíveis e retorna (modelos, erros)."""
     algos = algos or MODEL_ALGO_ORDER
     models: Dict[str, object] = {}
     errors: Dict[str, str] = {}
-    prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
+    prepared = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared is None:
         errors["_geral"] = "Sem dados suficientes para treinar (faltam features ou target)."
         return models, errors
@@ -799,6 +808,7 @@ def train_all_auxiliares_models(
                 margem=margem,
                 algo=algo,
                 prepared=prepared,
+                anchor_quantile=anchor_quantile,
             )
         except Exception as exc:
             errors[algo] = str(exc)
@@ -808,10 +818,13 @@ def train_all_auxiliares_models(
     if not models and "_geral" not in errors:
         errors["_geral"] = "Falha ao treinar os modelos."
     return models, errors
-def make_target(train_df: pd.DataFrame,
-                mode: str = "historico",
-                horas_disp: float = 6.0,
-                margem: float = 0.15) -> pd.Series:
+def make_target(
+    train_df: pd.DataFrame,
+    mode: str = "historico",
+    horas_disp: float = 6.0,
+    margem: float = 0.15,
+    anchor_quantile: Optional[float] = None,
+) -> pd.Series:
     """
     Retorna a série alvo (y) para treino do modelo:
     - historico: usa QtdAux da base (padrão atual da empresa)
@@ -823,6 +836,13 @@ def make_target(train_df: pd.DataFrame,
     # mode == "ideal"
     # Alvo ideal sem depender do QtdAux da própria loja.
     # Estima headcount ideal ancorando em Receita/Aux das lojas de melhor performance.
+    anchor_q = anchor_quantile
+    if anchor_q is None:
+        try:
+            anchor_q = safe_float(getattr(st.session_state, "anchor_rpa_quantile", 0.60), 0.60)
+        except Exception:
+            anchor_q = 0.60
+    anchor_q = max(0.1, min(0.95, float(anchor_q)))
     horas_disp_safe = max(float(horas_disp), 1e-6)
     receita_mes = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
     faturamento_hora = pd.to_numeric(train_df.get("Faturamento/Hora"), errors="coerce")
@@ -837,7 +857,8 @@ def make_target(train_df: pd.DataFrame,
     receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_base)
 
     # Referência de Receita por Auxiliar das lojas de melhor desempenho
-    anchor_rpa = _get_high_perf_anchor(train_df, q=0.75)
+    # Âncora (percentil) de Receita/Aux para evitar subdimensionar ou superdimensionar
+    anchor_rpa = _get_high_perf_anchor(train_df, q=anchor_q)
     if anchor_rpa is None or anchor_rpa <= 0:
         # fallback: mediana de ReceitaPorAux ou ReaisPorAtivo como proxy
         receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
@@ -1042,6 +1063,7 @@ def evaluate_model_cv(
     mode: str = "historico",
     horas_disp: float = 6.0,
     margem: float = 0.15,
+    anchor_quantile: Optional[float] = None,
     algo: Optional[str] = "xgboost",
 ) -> Dict[str, object]:
     """Executa avaliacao hold-out compartilhada entre os modelos."""
@@ -1049,7 +1071,7 @@ def evaluate_model_cv(
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
-    prepared = _prepare_model_data(train_df, mode, horas_disp, margem)
+    prepared = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared is None:
         return {}
     X_full, y_full, used_features, sample_weights = prepared
@@ -1067,6 +1089,7 @@ def evaluate_model_cv(
                 margem=margem,
                 algo=algo_name,
                 prepared=(split['X_train'], split['y_train'], used_features, split.get('sample_weight_train')),
+                anchor_quantile=anchor_quantile,
             )
         except Exception as exc:
             metrics_map[algo_name] = {'error': str(exc)}
@@ -1091,13 +1114,14 @@ def predict_with_uncertainty(
     mode: str = "historico",
     horas_disp: float = 6.0,
     margem: float = 0.15,
+    anchor_quantile: Optional[float] = None,
     algo: str = "xgboost",
 ) -> Dict[str, float]:
     """Aplica bootstrap (XGBoost) ou quantile regression (CatBoost) para estimar o IC de 98% pré-fila."""
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
-    prepared_full = _prepare_model_data(train_df, mode, horas_disp, margem)
+    prepared_full = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared_full is None:
         return {}
     if algo == "catboost":
@@ -1108,6 +1132,7 @@ def predict_with_uncertainty(
             margem=margem,
             algo="catboost",
             prepared=prepared_full,
+            anchor_quantile=anchor_quantile,
         )
         if not isinstance(model_cat, CatBoostQuantileModel):
             return {}
@@ -1151,6 +1176,7 @@ def predict_with_uncertainty(
             margem=margem,
             algo=algo,
             prepared=prepared_boot,
+            anchor_quantile=anchor_quantile,
         )
         if model_b is None:
             continue
@@ -1563,13 +1589,21 @@ def render_append(nome: str, schema_fn, subset_cols):
 # Cache de treinamento
 # =============================================================================
 @st.cache_resource(show_spinner=False)
-def _train_cached(train_df, mode: str, horas_disp: float, margem: float, cache_version: int = 7):
+def _train_cached(
+    train_df,
+    mode: str,
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: Optional[float] = None,
+    cache_version: int = 8,
+):
     """Mantém as versões treinadas (um por algoritmo) em cache."""
     models, errors = train_all_auxiliares_models(
         train_df,
         mode=mode,
         horas_disp=horas_disp,
         margem=margem,
+        anchor_quantile=anchor_quantile,
     )
     return {"models": models, "errors": errors}
 # =============================================================================
@@ -1803,6 +1837,7 @@ def gerar_resultados_modelos(
     horas_disp: float,
     margem: float,
     algo_order: Optional[List[str]] = None,
+    anchor_quantile: Optional[float] = None,
 ) -> Tuple[List[Dict[str, object]], Dict[str, str]]:
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
@@ -1832,6 +1867,7 @@ def gerar_resultados_modelos(
         mode=ref_mode,
         horas_disp=horas_disp,
         margem=margem,
+        anchor_quantile=anchor_quantile,
         algo=None,
     )
     resultados: List[Dict[str, object]] = []
@@ -1882,6 +1918,7 @@ def calcular_intervalos_modelos(
     algo_keys: List[str],
     n_boot: int = 8,
     quantis: Tuple[int, int] = (5, 95),
+    anchor_quantile: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
     feature_bounds = _feature_bounds_from_train(train_df)
@@ -1895,6 +1932,7 @@ def calcular_intervalos_modelos(
             mode=ref_mode,
             horas_disp=horas_disp,
             margem=margem,
+            anchor_quantile=anchor_quantile,
             algo=key,
         )
         if ci:
