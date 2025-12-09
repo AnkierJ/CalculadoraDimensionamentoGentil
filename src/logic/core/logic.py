@@ -489,6 +489,78 @@ MODEL_ALGO_NAMES = {
     "catboost": "CatBoostRegressor",
     "xgboost": "XGBoostRegressor",
 }
+
+
+def _get_high_perf_anchor(train_df: pd.DataFrame, q: float = 0.75) -> Optional[float]:
+    """
+    Retorna um valor de referência (percentil superior) de Receita por Auxiliar.
+    Usado para ancorar o alvo "ideal" nas lojas com melhor desempenho.
+    """
+    rec_por_aux = _compute_receita_por_aux(train_df, train_df.get("QtdAux"))
+    rec_valid = rec_por_aux.dropna()
+    rec_valid = rec_valid[rec_valid > 0]
+    if rec_valid.empty:
+        return None
+    try:
+        return float(rec_valid.quantile(q))
+    except Exception:
+        return None
+
+
+def _apply_high_perf_cap(y_series: pd.Series, train_df: pd.DataFrame, margem: float) -> pd.Series:
+    """
+    Limita o alvo ideal com base no desempenho das lojas de maior Receita/Aux.
+    Evita que o headcount "ideal" extrapole o que seria necessário para atingir
+    o nível de eficiência das top lojas.
+    """
+    anchor = _get_high_perf_anchor(train_df, q=0.80)
+    if anchor is None or anchor <= 0:
+        return y_series
+    receita = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
+    if receita is None or receita.empty:
+        return y_series
+    cap = (receita / anchor) * (1.0 + margem)
+    cap = cap.replace([np.inf, -np.inf], np.nan)
+    capped = y_series.copy()
+    cap_aligned = cap.reindex(y_series.index)
+    mask = cap_aligned.notna() & (cap_aligned > 0)
+    capped.loc[mask] = np.minimum(capped.loc[mask], cap_aligned.loc[mask])
+    return capped
+
+
+def _feature_bounds_from_train(train_df: pd.DataFrame, lower_q: float = 0.05, upper_q: float = 0.95) -> Dict[str, Tuple[float, float]]:
+    """
+    Calcula faixas de valores (quantis) das features numéricas para reuso na inferência.
+    Evita extrapolar muito além do espaço visto no treino.
+    """
+    bounds: Dict[str, Tuple[float, float]] = {}
+    if train_df is None or train_df.empty:
+        return bounds
+    for col in [c for c in FEATURE_COLUMNS if c in train_df.columns]:
+        series = pd.to_numeric(train_df[col], errors="coerce").dropna()
+        if series.empty:
+            continue
+        lo, hi = series.quantile([lower_q, upper_q])
+        if pd.notna(lo) and pd.notna(hi):
+            bounds[col] = (float(lo), float(hi))
+    return bounds
+
+
+def _cap_feature_row(feature_row: Dict[str, object], bounds: Dict[str, Tuple[float, float]]) -> Dict[str, object]:
+    """Aplica clipping nos valores de entrada conforme os quantis do treino."""
+    if not bounds or not feature_row:
+        return feature_row
+    capped = dict(feature_row)
+    for col, (lo, hi) in bounds.items():
+        if col not in capped:
+            continue
+        try:
+            val = float(capped[col])
+        except Exception:
+            continue
+        capped[col] = min(max(val, lo), hi)
+    return capped
+
 def _prepare_model_data(
     train_df: pd.DataFrame,
     mode: str,
@@ -749,26 +821,40 @@ def make_target(train_df: pd.DataFrame,
     if mode == "historico":
         return y_hist
     # mode == "ideal"
-    # Se no futuro você criar uma coluna de carga por loja (ex: CargaTeoricaHoras),
-    # ela entra aqui. Por enquanto, deixa preparado:
-    y_ideal = pd.Series(np.nan, index=train_df.index, dtype="float64")
-    carga_semana = pd.Series(np.nan, index=train_df.index, dtype="float64")
-    if "CargaTeoricaHoras" in train_df.columns:
-        carga_semana = pd.to_numeric(train_df["CargaTeoricaHoras"], errors="coerce")
-    if carga_semana.isna().all():
-        carga_semana = pd.to_numeric(train_df["QtdAux"], errors="coerce") * float(horas_disp)
+    # Alvo ideal sem depender do QtdAux da própria loja.
+    # Estima headcount ideal ancorando em Receita/Aux das lojas de melhor performance.
     horas_disp_safe = max(float(horas_disp), 1e-6)
-    y_ideal = (carga_semana / horas_disp_safe) * (1.0 + margem)
-    y_final = y_ideal.fillna(y_hist)
-    receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
-    receita_por_aux = receita_por_aux.replace([np.inf, -np.inf], np.nan)
-    valid = receita_por_aux.notna() & (receita_por_aux > 0)
-    if valid.sum() >= 3:
-        ref = receita_por_aux.loc[valid].median()
-        if pd.notna(ref) and ref > 0:
-            ajuste = (ref / receita_por_aux).clip(lower=0.55, upper=1.45).fillna(1.0)
-            y_final = y_final * ajuste.reindex(y_final.index, fill_value=1.0)
-    return y_final.clip(lower=0.0)
+    receita_mes = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
+    faturamento_hora = pd.to_numeric(train_df.get("Faturamento/Hora"), errors="coerce")
+    horas_op = pd.to_numeric(train_df.get("HorasOperacionais"), errors="coerce")
+    horas_op = horas_op.where(horas_op > 0, np.nan)
+    receita_est_hora = faturamento_hora * horas_op * WEEKS_PER_MONTH
+    base_ativa = pd.to_numeric(train_df.get("BaseAtiva"), errors="coerce")
+    reais_por_ativo = pd.to_numeric(train_df.get("ReaisPorAtivo"), errors="coerce")
+    receita_est_base = base_ativa * reais_por_ativo / WEEKS_PER_MONTH
+    receita_base = receita_mes
+    receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_hora)
+    receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_base)
+
+    # Referência de Receita por Auxiliar das lojas de melhor desempenho
+    anchor_rpa = _get_high_perf_anchor(train_df, q=0.75)
+    if anchor_rpa is None or anchor_rpa <= 0:
+        # fallback: mediana de ReceitaPorAux ou ReaisPorAtivo como proxy
+        receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
+        receita_por_aux = receita_por_aux.replace([np.inf, -np.inf], np.nan)
+        anchor_rpa = float(receita_por_aux.median(skipna=True)) if receita_por_aux.notna().any() else float(reais_por_ativo.median(skipna=True))
+    if anchor_rpa is None or not np.isfinite(anchor_rpa) or anchor_rpa <= 0:
+        anchor_rpa = 1.0
+
+    # Headcount ideal = receita esperada / receita por aux de referência
+    y_ideal = receita_base / max(anchor_rpa, 1e-6)
+    y_ideal = y_ideal * (1.0 + margem)
+    # Se faltar receita, preenche com mediana do próprio alvo ideal (evita usar QtdAux individual)
+    mediana_ideal = float(y_ideal.median(skipna=True)) if y_ideal.notna().any() else float(y_hist.median(skipna=True))
+    y_ideal = y_ideal.fillna(mediana_ideal)
+    # ancora no desempenho das lojas com maior receita por auxiliar (mantém teto de eficiência)
+    y_ideal = _apply_high_perf_cap(y_ideal, train_df, margem)
+    return y_ideal.clip(lower=0.0)
 def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.Series:
     """Retorna série com receita (mês ou hora) dividida por auxiliar."""
     if train_df is None or qtd_aux is None or train_df.empty:
@@ -1721,6 +1807,8 @@ def gerar_resultados_modelos(
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
     algo_sequence = algo_order or MODEL_ALGO_ORDER
+    feature_bounds = _feature_bounds_from_train(train_df)
+    capped_features = _cap_feature_row(features_input, feature_bounds)
     if not models:
         # mesmo sem modelos carregados, retorne erros conhecidos na ordem esperada
         resultados_stub = []
@@ -1766,7 +1854,7 @@ def gerar_resultados_modelos(
         try:
             pred, queue_diag = predict_qtd_auxiliares(
                 modelo_atual,
-                features_input,
+                capped_features,
                 return_details=True,
             )
         except Exception as exc:
@@ -1796,10 +1884,12 @@ def calcular_intervalos_modelos(
     quantis: Tuple[int, int] = (5, 95),
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
+    feature_bounds = _feature_bounds_from_train(train_df)
+    capped_features = _cap_feature_row(features_input, feature_bounds)
     for key in algo_keys:
         ci = predict_with_uncertainty(
             train_df,
-            features_input,
+            capped_features,
             n_boot=n_boot,
             q=quantis,
             mode=ref_mode,
@@ -1877,7 +1967,8 @@ def avaliar_carga_operacional_ideal(
 ) -> Dict[str, object]:
     amostras_loja, _ = _filter_df_by_loja(amostras_df, loja_nome_alvo)
     tempos = agregar_tempo_medio_por_processo(amostras_loja)
-    freq_df = pd.DataFrame(columns=["Processo", "frequencia"])
+    # cria DF de frequÇõÇœncias vazio mas com a coluna Loja para evitar KeyError no merge
+    freq_df = pd.DataFrame(columns=["Loja", "Processo", "frequencia"])
     detalhe, carga_total_diaria = carga_total_horas_loja(
         tempos_processo=tempos,
         frequencias=freq_df,

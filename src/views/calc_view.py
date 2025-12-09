@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from src.logic.data.buscaDeLojas import _get_loja_row
+from src.logic.data.buscaDeLojas import _get_loja_row, _ensure_loja_key
 from src.logic.core.logic import (
     DEFAULT_OCUPACAO_ALVO,
     DEFAULT_ABSENTEISMO,
@@ -16,6 +16,7 @@ from src.logic.core.logic import (
     avaliar_carga_operacional_ideal,
     calcular_intervalos_modelos,
     calcular_resultado_ideal_simplificado,
+    make_target,
     clean_training_dataframe,
     gerar_resultados_modelos,
     get_total_reference_values,
@@ -530,6 +531,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     "Altere livremente para simular contextos de demanda e operação."
                 )
 
+                tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
                 sim_col1, sim_col2, sim_col3 = st.columns(3)
                 with sim_col1:
                     sim_pedidos_dia = st.number_input(
@@ -833,6 +835,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             dias_operacionais_ativos,
             horas_loja_manual,
         )
+        # Valor de TMA padrÇœo reutilizado em ambos modos ideais para evitar UnboundLocalError
+        tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
 
         if modo_calc == "Ideal (Machine Learning)":
             resultados_modelos_ideal, model_errors = gerar_resultados_modelos(
@@ -1047,7 +1051,64 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 f"Tempo médio: {result_ideal.get('tmedio_min_atendimento', 0.0):.2f} min | "
                 f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
             )
+ 
+        # Comparativo automÇático das 20 primeiras lojas (HistÇürico vs Ideal)
+        if modo_calc in ("Ideal (Machine Learning)", "Ideal (Simplificado)") and not train_df.empty:
+            estrutura_df = st.session_state.get("dEstrutura")
+            if estrutura_df is not None and not estrutura_df.empty:
+                try:
+                    estrutura_norm = _ensure_loja_key(estrutura_df)
+                    train_norm = _ensure_loja_key(train_df)
+                    if "Loja" not in estrutura_norm.columns:
+                        raise KeyError("Coluna 'Loja' não encontrada na base de estrutura.")
+                    lojas_top = estrutura_norm["Loja"].astype(str).head(20).tolist()
+                    model_hist = _train_cached(train_df, "historico", horas_disp, margem)
+                    model_ideal = _train_cached(train_df, "ideal", horas_disp, margem)
 
+                    def _pred_for_loja(bundle, feature_row: Dict[str, object], ref_mode: str) -> Optional[float]:
+                        if bundle is None or not feature_row:
+                            return None
+                        resultados, _ = gerar_resultados_modelos(
+                            bundle,
+                            train_df,
+                            feature_row,
+                            ref_mode,
+                            horas_disp,
+                            margem,
+                        )
+                        preferidos = ("catboost", "xgboost")
+                        for key in preferidos:
+                            res = next((r for r in resultados if r.get("key") == key and r.get("pred") is not None), None)
+                            if res:
+                                return float(res.get("pred"))
+                        res_any = next((r for r in resultados if r.get("pred") is not None), None)
+                        if res_any:
+                            return float(res_any.get("pred"))
+                        return None
+
+                    linhas_comp: List[Dict[str, object]] = []
+                    for loja_nome in lojas_top:
+                        feature_row, _ = _get_loja_row(train_norm, loja_nome)
+                        if not feature_row:
+                            continue
+                        loja_display = str(feature_row.get("Loja", loja_nome)).strip() or loja_nome
+                        qtd_hist = _pred_for_loja(model_hist, feature_row, "historico")
+                        qtd_ideal = _pred_for_loja(model_ideal, feature_row, "ideal")
+                        if qtd_hist is None:
+                            qtd_hist = safe_float(feature_row.get("QtdAux"))
+                        linhas_comp.append(
+                            {
+                                "Loja": loja_display,
+                                "QtdAux Histórico": qtd_hist,
+                                "QtdAux Ideal": qtd_ideal,
+                            }
+                        )
+                    if linhas_comp:
+                        tabela_comp = pd.DataFrame(linhas_comp)
+                        st.subheader("Comparativo automático (20 primeiras lojas)")
+                        st.dataframe(tabela_comp, use_container_width=True)
+                except Exception as exc:
+                    st.info(f"Não foi possível montar a tabela comparativa: {exc}")
 
 # Helpers internos
 from src.logic.models.model_fila import (
@@ -1092,6 +1153,9 @@ def _render_queue_comparison_block(
     rho_target: float,
     contexto: str = "",
 ) -> None:
+    # Não exibir bloco de fila no modo Ideal (pedido do usuário)
+    if contexto and "Ideal" in contexto:
+        return
     if not resultados_modelos or not feature_row:
         return
     queue_inputs = estimate_queue_inputs(feature_row)
