@@ -365,36 +365,18 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             if has_lookup:
                 base_total_val = get_lookup_value("BaseTotal", ["Base"])
                 base_ativa_val = get_lookup_value("BaseAtiva")
-                a0_val = get_lookup_value("A0")
-                a1aa3_val = get_lookup_value("A1aA3")
-                churn_val = get_lookup_value("Churn")
                 receita_total_val = get_lookup_value("ReceitaTotalMes")
                 reais_por_ativo_val = get_lookup_value("ReaisPorAtivo")
-                atividade_er_val = get_lookup_value("AtividadeER")
-                inicios_val = get_lookup_value("Inicios")
-                reinicios_val = get_lookup_value("Reinicios")
-                recuperados_val = get_lookup_value("Recuperados")
-                i4a_i6_val = get_lookup_value("I4aI6")
             else:
                 base_total_val = 0.0
                 base_ativa_val = 0.0
-                a0_val = 0.0
-                a1aa3_val = 0.0
-                churn_val = 0.0
                 receita_total_val = 0.0
                 reais_por_ativo_val = 0.0
-                atividade_er_val = 0.0
-                inicios_val = 0.0
-                reinicios_val = 0.0
-                recuperados_val = 0.0
-                i4a_i6_val = 0.0
 
-            colIndA, colIndB, colIndC = st.columns(3)
+            colIndA, colIndB = st.columns(2)
             with colIndA:
                 base_total = st.number_input("Base Total", min_value=0.0, step=1.0, value=base_total_val)
                 base_ativa = st.number_input("Base Ativa", min_value=0.0, step=1.0, value=base_ativa_val)
-                a0 = st.number_input("A0", min_value=0.0, step=1.0, value=a0_val)
-                a1aA3 = st.number_input("A1 a A3", min_value=0.0, step=1.0, value=a1aa3_val)
             cluster_targets = [
                 "Pedidos/Hora",
                 "Pedidos/Dia",
@@ -405,13 +387,16 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             with colIndB:
                 receita_total = st.number_input("Receita Total (R$)", min_value=0.0, step=100.0, value=receita_total_val, format="%.2f")
                 reais_por_ativo = st.number_input("Reais por Ativo (R$)", min_value=0.0, step=1.0, value=reais_por_ativo_val, format="%.2f")
-                atividade_er = st.number_input("Atividade ER", min_value=0.0, max_value=100.0, step=0.001, value=atividade_er_val, format="%.3f")
-                churn = st.number_input("Churn", min_value=0.0, max_value=100.0, step=0.001, value=churn_val, format="%.3f")
-            with colIndC:
-                inicios = st.number_input("Inícios", min_value=0.0, step=1.0, value=inicios_val)
-                reinicios = st.number_input("Reinícios", min_value=0.0, step=1.0, value=reinicios_val)
-                recuperados = st.number_input("Recuperados", min_value=0.0, step=1.0, value=recuperados_val)
-                i4_a_i6 = st.number_input("I4 a I6", min_value=0.0, step=1.0, value=i4a_i6_val)
+
+            # Campos não usados no modelo são fixados em zero (removidos do formulário)
+            atividade_er = 0.0
+            churn = 0.0
+            inicios = 0.0
+            reinicios = 0.0
+            recuperados = 0.0
+            i4_a_i6 = 0.0
+            a0 = 0.0
+            a1aA3 = 0.0
 
             indicadores_ctx = preparar_indicadores_operacionais(
                 base_total=base_total,
@@ -652,14 +637,25 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
  
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
-                anchor_percent = st.select_slider(
-                    "Âncora receita/aux (%)",
-                    options=[50, 55, 60, 65, 70, 75, 80, 85, 90],
-                    value=int(st.session_state.get("anchor_rpa_percent", 60)),
-                    help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, percentil mais alto.",
-                )
-                st.session_state["anchor_rpa_percent"] = anchor_percent
-            st.session_state["anchor_rpa_quantile"] = float(anchor_percent) / 100.0
+
+                if ref_mode != "historico":
+
+                    anchor_percent = st.select_slider(
+
+                        "Âncora receita/aux (%)",
+
+                        options=[50, 55, 60, 65, 70, 75, 80, 85, 90],
+
+                        value=int(st.session_state.get("anchor_rpa_percent", 60)),
+
+                        help="Percentil de receita por auxiliar usado como refer?ncia: se a meta ? evitar falta de gente, prefira percentil mais baixo; se a meta ? efici?ncia agressiva, prefira percentil mais alto.",
+
+                    )
+
+                else:
+
+                    anchor_percent = float(st.session_state.get("anchor_rpa_percent", 60))
+
         with col3:
             st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
             submitted = st.form_submit_button(
@@ -668,11 +664,27 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     use_container_width=True,
                 )
 
+    if submitted:
+        st.session_state["anchor_rpa_percent"] = anchor_percent
+        st.session_state["anchor_rpa_quantile"] = float(anchor_percent) / 100.0
+
     dias_operacionais_ativos = int(st.session_state.get("dias_operacionais_loja_form", dias_operacionais_semana))
     dias_operacionais_ativos = max(1, min(7, dias_operacionais_ativos))
-    anchor_quantile = float(st.session_state.get("anchor_rpa_quantile", 0.60))
+    anchor_quantile = float(st.session_state.get("anchor_rpa_quantile", float(anchor_percent) / 100.0))
 
     if not submitted:
+        return
+
+    campos_obrigatorios = [
+        area_total,
+        base_total,
+        base_ativa,
+        receita_total,
+        pedidos_dia,
+        faturamento_hora,
+    ]
+    if not any(val and val > 0 for val in campos_obrigatorios):
+        st.warning("Preencha os dados da loja (base/receita/pedidos/faturamento) antes de calcular.")
         return
 
     loja_nome_alvo_submit = None
@@ -831,11 +843,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         }
                 else:
                     placeholder.caption("Int. 90% indisponível")
-            _render_queue_comparison_block(
-                resultados_modelos,
-                features_input,
-                ocupacao_alvo,
-            )
         if model_errors:
             itens = []
             for key, msg in (model_errors or {}).items():
@@ -991,12 +998,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             }
                     else:
                         placeholder.caption("Int. 90% indisponível")
-                _render_queue_comparison_block(
-                    resultados_modelos_ideal,
-                    features_input,
-                    ocupacao_alvo,
-                    " (Ideal)",
-                )
             if model_errors:
                 itens = []
                 for key, msg in (model_errors or {}).items():
