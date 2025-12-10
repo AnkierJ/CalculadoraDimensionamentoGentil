@@ -95,6 +95,7 @@ def render_comparativo_tab(tab_container) -> None:
 
         estrutura_norm = _ensure_loja_key(estrutura_df)
         train_norm = _ensure_loja_key(train_df)
+        pessoas_norm = _ensure_loja_key(pessoas_df)
         if "Loja" not in estrutura_norm.columns:
             st.warning("Coluna 'Loja' não encontrada na base de estrutura.")
             return
@@ -170,6 +171,11 @@ def render_comparativo_tab(tab_container) -> None:
             if not feature_row:
                 continue
             loja_display = str(feature_row.get("Loja", loja_nome)).strip() or loja_nome
+            qtd_aux_real = None
+            if pessoas_norm is not None and not pessoas_norm.empty:
+                pessoas_row, _ = _get_loja_row(pessoas_norm, loja_nome)
+                if pessoas_row:
+                    qtd_aux_real = safe_float(pessoas_row.get("QtdAux"))
             porte_label, porte_info = _classificar_porte(feature_row)
             preds_hist = _preds_for_loja(model_hist, train_df, feature_row, "historico", horas_disp, margem, anchor_quantile)
             preds_ideal = _preds_for_loja(model_ideal, train_df, feature_row, "ideal", horas_disp, margem, anchor_quantile)
@@ -197,7 +203,10 @@ def render_comparativo_tab(tab_container) -> None:
             linhas_comp.append(
                 {
                     "Loja": loja_display,
+                    "QtdAux Real": qtd_aux_real,
                     "QtdAux Histórico": qtd_hist_pref,
+                    "QtdAux Histórico CatBoost": qtd_hist_cat,
+                    "QtdAux Histórico XGBoost": qtd_hist_xg,
                     "QtdAux Ideal": qtd_ideal_pref,
                     "QtdAux Ideal CatBoost": qtd_ideal_cat,
                     "QtdAux Ideal XGBoost": qtd_ideal_xg,

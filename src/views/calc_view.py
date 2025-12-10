@@ -40,12 +40,10 @@ from src.logic.core.logic import apply_operacional_defaults_from_lookup
 def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     """Renderiza a aba de cálculo até a preparação das features."""
     with tab_calc:
-        st.subheader("Configurações")
         st.subheader("Modo de cálculo")
         opcoes = [
-            "Histórico (Machine Learning)",
-            "Ideal (Machine Learning)",
-            "Ideal (Simplificado)",
+            "Machine Learning",
+            "Simplificado (Simulações)",
         ]
         if "modo_calc" not in st.session_state:
             st.session_state.modo_calc = opcoes[0]
@@ -53,7 +51,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         def set_modo(modo):
             st.session_state.modo_calc = modo
 
-        cols = st.columns(3)
+        cols = st.columns(2)
         for col, opcao in zip(cols, opcoes):
             with col:
                 st.button(
@@ -65,7 +63,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     kwargs={"modo": opcao},
                 )
         modo_calc = st.session_state.modo_calc
-        ref_mode = "historico" if modo_calc == "Histórico (Machine Learning)" else "ideal"
+        modo_ml = modo_calc == "Machine Learning"
+        modo_simplificado = modo_calc == "Simplificado (Simulações)"
 
         st.divider()
 
@@ -295,7 +294,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             colA, colB, colC = st.columns(3)
             with colA:
                 area_total = st.number_input(
-                    "Area Total",
+                    "Área Total",
                     min_value=0.0,
                     step=1.0,
                     value=estrutura_defaults.get("Area Total", 0.0),
@@ -521,7 +520,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             # -----------------------------
             # Dados Manuseáveis (modo Simplificado)
             # -----------------------------
-            if modo_calc == "Ideal (Simplificado)":
+            if modo_simplificado:
                 st.divider()
                 st.markdown("### Dados manuseáveis (simulação)")
 
@@ -653,7 +652,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
 
-                if ref_mode != "historico":
+                if modo_ml:
 
                     anchor_percent = st.select_slider(
 
@@ -718,393 +717,291 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     elif len(train_df) < 15:
         st.info(f"A base de treino possui apenas {len(train_df)} lojas. As métricas podem variar bastante.")
 
-    model_bundle = None
-    if modo_calc in ("Histórico (Machine Learning)", "Ideal (Machine Learning)"):
+    model_bundle_hist = None
+    model_bundle_ideal = None
+    if modo_ml:
         cache_ver = 9 + int(anchor_quantile * 100)
-        model_bundle = _train_cached(
+        model_bundle_hist = _train_cached(
             train_df,
-            ref_mode,
+            "historico",
+            horas_disp,
+            margem,
+            anchor_quantile=anchor_quantile,
+            cache_version=cache_ver,
+        )
+        model_bundle_ideal = _train_cached(
+            train_df,
+            "ideal",
             horas_disp,
             margem,
             anchor_quantile=anchor_quantile,
             cache_version=cache_ver,
         )
 
-    if modo_calc == "Histórico (Machine Learning)":
-        resultados_modelos, model_errors = gerar_resultados_modelos(
-            model_bundle,
-            train_df,
-            features_input,
-            ref_mode,
-            horas_disp,
-            margem,
-            anchor_quantile=anchor_quantile,
-        )
-        if not resultados_modelos:
-            err_msgs = []
-            for key, msg in (model_errors or {}).items():
-                label = MODEL_ALGO_NAMES.get(key, key) if key != "_geral" else "Modelo"
-                err_msgs.append(f"{label}: {msg}")
-            detalhe = "; ".join(err_msgs) if err_msgs else "Faça upload de dEstrutura, dPessoas e (opcional) fIndicadores."
-            st.error(f"Não há modelos treinados. {detalhe}")
-        else:
-            st.success("Cálculo concluído!")
-            st.subheader("Qtd Auxiliares estimada por modelo")
-            cols = st.columns(len(resultados_modelos))
-            ci_placeholders: List[tuple[Dict[str, object], DeltaGenerator]] = []
-            for col, res in zip(cols, resultados_modelos):
-                metrics_info = res["metrics"] or {}
-                precisao = metrics_info.get("Precisao_percent")
-                r2m = metrics_info.get("R2_mean")
-                mae_v = metrics_info.get("MAE")
-                rmse_v = metrics_info.get("RMSE")
-                mape_v = metrics_info.get("MAPE")
-                warnings_info = metrics_info.get("warnings")
-                queue_diag = res.get("queue_diag")
-                cluster_info = res.get("cluster_adjust") or {}
-                pred_raw = float(res.get("pred") or 0.0)
-                def _ajustar_pred(pred_val: float) -> tuple[float, Dict[str, float]]:
-                    # Ajusta somente a diferença em relação ao baseline (absenteísmo/folga pré-preenchidos).
-                    base_abs = float(absenteismo_prefill)
-                    base_folga = float(folga_base)
-                    fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
-                    fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
-                    ajuste_total = fator_abs * fator_folga
-                    return pred_val * ajuste_total, {
-                        "fator_abs": fator_abs,
-                        "fator_folga": fator_folga,
-                        "ajuste_total": ajuste_total,
-                    }
-                pred_ajust, adj_debug = _ajustar_pred(pred_raw)
-                res["pred_ajust"] = pred_ajust
-                res["ajuste_debug"] = adj_debug
-                with col:
-                    st.metric(res["label"], f"{pred_ajust:.2f} aux")
-                    caption_lines: List[str] = []
-                    caption_lines.append(
-                        f"Bruto: {pred_raw:.2f} | ajuste x{adj_debug['ajuste_total']:.2f} "
-                        f"(abs {adj_debug['fator_abs']:.2f}, folga {adj_debug['fator_folga']:.2f})"
-                    )
-                    if _metric_has_value(precisao):
-                        caption_lines.append(f"Precisão: {precisao:.1f}%")
-                    if _metric_has_value(r2m):
-                        caption_lines.append(f"R2: {r2m:.2f}")
-                    detail_parts: List[str] = []
-                    if _metric_has_value(mae_v):
-                        detail_parts.append(f"MAE {mae_v:.2f}")
-                    if _metric_has_value(rmse_v):
-                        detail_parts.append(f"RMSE {rmse_v:.2f}")
-                    if _metric_has_value(mape_v):
-                        detail_parts.append(f"MAPE {mape_v*100:.1f}%")
-                    if detail_parts:
-                        caption_lines.append(" | ".join(detail_parts))
-                    if cluster_info and cluster_info.get("cluster_pred") is not None:
-                        cid = cluster_info.get("cluster_id")
-                        peso = float(cluster_info.get("weight", 0.0) or 0.0)
-                        cluster_pred = float(cluster_info.get("cluster_pred", 0.0) or 0.0)
-                        cluster_size = cluster_info.get("cluster_size", "?")
-                        cid_label = f"c{cid + 1}" if cid is not None else "c?"
-                        caption_lines.append(
-                            f"Cluster porte {cid_label}: {cluster_pred:.2f} (peso {peso:.2f}, n={cluster_size})"
-                        )
-                    for text_line in caption_lines:
-                        st.caption(text_line)
-                    if warnings_info:
-                        warn_text = "; ".join(warnings_info) if isinstance(warnings_info, (list, tuple)) else str(warnings_info)
-                        st.caption(f"Avisos: {warn_text}")
-                    diag_text = _format_queue_diag(queue_diag)
-                    if diag_text:
-                        st.caption(f"Fila: {diag_text}")
-                placeholder_ci = col.empty()
-                placeholder_ci.caption("Int. 90%: calculando.")
-                ci_placeholders.append((res, placeholder_ci))
+    estrutura_df = st.session_state.get("dEstrutura")
+    pessoas_df = st.session_state.get("dPessoas")
+    horas_por_colab = float(st.session_state.get("horas_disp_semanais", horas_disp))
+    horas_loja_manual = float(st.session_state.get("horas_loja_config", horas_loja_config))
+    manual_horas_form = safe_float(st.session_state.get("horas_operacionais_form"), 0.0)
+    horas_loja, dias_operacionais_ativos = preparar_contexto_operacional(
+        loja_nome_alvo_submit,
+        estrutura_df,
+        pessoas_df,
+        manual_horas_form,
+        dias_operacionais_em_uso,
+        dias_operacionais_ativos,
+        horas_loja_manual,
+    )
+    tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
+    result_ideal = None
 
-            algo_keys = [res["key"] for res in resultados_modelos]
-            with st.spinner("Calculando intervalos (Histórico)."):
-                ci_map = calcular_intervalos_modelos(
-                    train_df,
-                    features_input,
-                    ref_mode,
-                    horas_disp,
-                    margem,
-                    algo_keys,
-                    anchor_quantile=anchor_quantile,
-                )
-            for res, placeholder in ci_placeholders:
-                ci = ci_map.get(res["key"])
-                if ci:
-                    ci_label = ci.get("ci_label") or "Int. 90%"
-                    low_disp = ci.get("ci_low_disp", ci["ci_low"])
-                    high_disp = ci.get("ci_high_disp", ci["ci_high"])
-                    mid_disp = ci.get("ci_mid_disp", ci["pred_mean"])
-                    low_txt = _format_interval_value(low_disp)
-                    high_txt = _format_interval_value(high_disp)
-                    mid_txt = _format_interval_value(mid_disp)
-                    placeholder.caption(f"{ci_label}: {low_txt} - {high_txt} (~ {mid_txt})")
-                    if ci.get("ci_low_raw_disp") is not None and ci.get("ci_high_raw_disp") is not None:
-                        raw_label = ci.get("ci_label_raw") or "Int. 90% (pré-fila)"
-                        raw_low = ci["ci_low_raw_disp"]
-                        raw_high = ci["ci_high_raw_disp"]
-                        raw_mid = ci.get("ci_mid_raw_disp", ci["pred_mean"])
-                        raw_low_txt = _format_interval_value(raw_low)
-                        raw_high_txt = _format_interval_value(raw_high)
-                        raw_mid_txt = _format_interval_value(raw_mid)
-                        placeholder.caption(f"{raw_label}: {raw_low_txt} - {raw_high_txt} (~ {raw_mid_txt})")
-                    if res["key"] == "catboost":
-                        res["ci_debug"] = {
-                            "ci_low": ci.get("ci_low"),
-                            "ci_high": ci.get("ci_high"),
-                            "pred_mean": ci.get("pred_mean"),
-                        }
-                else:
-                    placeholder.caption("Int. 90% indisponível")
-        if model_errors:
-            itens = []
-            for key, msg in (model_errors or {}).items():
-                if key == "_geral":
-                    itens.append(msg)
-                else:
-                    itens.append(f"{MODEL_ALGO_NAMES.get(key, key)}: {msg}")
-            st.info("Modelos indisponíveis ou com erro: " + "; ".join(itens))
-
-    else:
-        result_ideal = None
-        estrutura_df = st.session_state.get("dEstrutura")
-        pessoas_df = st.session_state.get("dPessoas")
-        horas_por_colab = float(st.session_state.get("horas_disp_semanais", horas_disp))
-        horas_loja_manual = float(st.session_state.get("horas_loja_config", horas_loja_config))
-        manual_horas_form = safe_float(st.session_state.get("horas_operacionais_form"), 0.0)
-        horas_loja, dias_operacionais_ativos = preparar_contexto_operacional(
-            loja_nome_alvo_submit,
-            estrutura_df,
-            pessoas_df,
-            manual_horas_form,
-            dias_operacionais_em_uso,
-            dias_operacionais_ativos,
-            horas_loja_manual,
-        )
-        # Valor de TMA padrÇœo reutilizado em ambos modos ideais para evitar UnboundLocalError
-        tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
-
-        if modo_calc == "Ideal (Machine Learning)":
-            resultados_modelos_ideal, model_errors = gerar_resultados_modelos(
-                model_bundle,
+    if modo_ml:
+        resultados_modelos: List[Dict[str, object]] = []
+        resultados_modelos_ideal: List[Dict[str, object]] = []
+        model_errors_hist: Dict[str, object] = {}
+        model_errors_ideal: Dict[str, object] = {}
+        if model_bundle_hist is not None:
+            resultados_modelos, model_errors_hist = gerar_resultados_modelos(
+                model_bundle_hist,
                 train_df,
                 features_input,
-                ref_mode,
+                "historico",
                 horas_disp,
                 margem,
                 anchor_quantile=anchor_quantile,
             )
-            if not resultados_modelos_ideal:
-                err_msgs = []
-                for key, msg in (model_errors or {}).items():
-                    label = MODEL_ALGO_NAMES.get(key, key) if key != "_geral" else "Modelo"
-                    err_msgs.append(f"{label}: {msg}")
-                detalhe = "; ".join(err_msgs) if err_msgs else "Faça upload de dEstrutura, dPessoas e fIndicadores suficientes."
-                st.error(f"Não há modelos treinados (Ideal). {detalhe}")
-            else:
-                st.success("Previsão (Ideal ML) concluída!")
-                st.subheader("Qtd Auxiliares (ideal) por modelo")
-                cols = st.columns(len(resultados_modelos_ideal))
-                ci_placeholders_ideal: List[tuple[Dict[str, object], DeltaGenerator]] = []
-                for col, res in zip(cols, resultados_modelos_ideal):
-                    metrics_info = res["metrics"] or {}
-                    precisao = metrics_info.get("Precisao_percent")
-                    r2m = metrics_info.get("R2_mean")
-                    mae_v = metrics_info.get("MAE")
-                    rmse_v = metrics_info.get("RMSE")
-                    mape_v = metrics_info.get("MAPE")
-                    warnings_info = metrics_info.get("warnings")
-                    queue_diag = res.get("queue_diag")
-                    cluster_info = res.get("cluster_adjust") or {}
-                    pred_raw = float(res.get("pred") or 0.0)
-                    def _ajustar_pred_ideal(pred_val: float) -> tuple[float, Dict[str, float]]:
-                        base_abs = float(absenteismo_prefill)
-                        base_folga = float(folga_base)
-                        fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
-                        fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
-                        ajuste_total = fator_abs * fator_folga
-                        return pred_val * ajuste_total, {
-                            "fator_abs": fator_abs,
-                            "fator_folga": fator_folga,
-                            "ajuste_total": ajuste_total,
-                        }
-                    pred_ajust, adj_debug = _ajustar_pred_ideal(pred_raw)
-                    res["pred_ajust"] = pred_ajust
-                    res["ajuste_debug"] = adj_debug
-                    with col:
-                        st.metric(res["label"], f"{pred_ajust:.2f} aux")
-                        caption_lines: List[str] = []
-                        caption_lines.append(
-                            f"Bruto: {pred_raw:.2f} | ajuste x{adj_debug['ajuste_total']:.2f} "
-                            f"(abs {adj_debug['fator_abs']:.2f}, folga {adj_debug['fator_folga']:.2f})"
-                        )
-                        if _metric_has_value(precisao):
-                            caption_lines.append(f"Precisão: {precisao:.1f}%")
-                        if _metric_has_value(r2m):
-                            caption_lines.append(f"R2: {r2m:.2f}")
-                        detail_parts: List[str] = []
-                        if _metric_has_value(mae_v):
-                            detail_parts.append(f"MAE {mae_v:.2f}")
-                        if _metric_has_value(rmse_v):
-                            detail_parts.append(f"RMSE {rmse_v:.2f}")
-                        if _metric_has_value(mape_v):
-                            detail_parts.append(f"MAPE {mape_v*100:.1f}%")
-                        if detail_parts:
-                            caption_lines.append(" | ".join(detail_parts))
-                        if cluster_info and cluster_info.get("cluster_pred") is not None:
-                            cid = cluster_info.get("cluster_id")
-                            peso = float(cluster_info.get("weight", 0.0) or 0.0)
-                            cluster_pred = float(cluster_info.get("cluster_pred", 0.0) or 0.0)
-                            cluster_size = cluster_info.get("cluster_size", "?")
-                            cid_label = f"c{cid + 1}" if cid is not None else "c?"
-                            caption_lines.append(
-                                f"Cluster porte {cid_label}: {cluster_pred:.2f} (peso {peso:.2f}, n={cluster_size})"
-                            )
-                        for text_line in caption_lines:
-                            st.caption(text_line)
-                        if warnings_info:
-                            warn_text = "; ".join(warnings_info) if isinstance(warnings_info, (list, tuple)) else str(warnings_info)
-                            st.caption(f"Avisos: {warn_text}")
-                        diag_text = _format_queue_diag(queue_diag)
-                        if diag_text:
-                            st.caption(f"Fila: {diag_text}")
-                    placeholder_ci = col.empty()
-                    placeholder_ci.caption("Int. 90%: calculando.")
-                    ci_placeholders_ideal.append((res, placeholder_ci))
-
-                algo_keys_ideal = [res["key"] for res in resultados_modelos_ideal]
-                with st.spinner("Calculando intervalos (Ideal)."):
-                    ci_map_ideal = calcular_intervalos_modelos(
-                        train_df,
-                        features_input,
-                        ref_mode,
-                        horas_disp,
-                        margem,
-                        algo_keys_ideal,
-                        anchor_quantile=anchor_quantile,
-                    )
-                for res, placeholder in ci_placeholders_ideal:
-                    ci = ci_map_ideal.get(res["key"])
-                    if ci:
-                        ci_label = ci.get("ci_label") or "Int. 90%"
-                        low_disp = ci.get("ci_low_disp", ci["ci_low"])
-                        high_disp = ci.get("ci_high_disp", ci["ci_high"])
-                        mid_disp = ci.get("ci_mid_disp", ci["pred_mean"])
-                        low_txt = _format_interval_value(low_disp)
-                        high_txt = _format_interval_value(high_disp)
-                        mid_txt = _format_interval_value(mid_disp)
-                        placeholder.caption(f"{ci_label}: {low_txt} - {high_txt} (~ {mid_txt})")
-                        if ci.get("ci_low_raw_disp") is not None and ci.get("ci_high_raw_disp") is not None:
-                            raw_label = ci.get("ci_label_raw") or "Int. 90% (pré-fila)"
-                            raw_low = ci["ci_low_raw_disp"]
-                            raw_high = ci["ci_high_raw_disp"]
-                            raw_mid = ci.get("ci_mid_raw_disp", ci["pred_mean"])
-                            raw_low_txt = _format_interval_value(raw_low)
-                            raw_high_txt = _format_interval_value(raw_high)
-                            raw_mid_txt = _format_interval_value(raw_mid)
-                            placeholder.caption(f"{raw_label}: {raw_low_txt} - {raw_high_txt} (~ {raw_mid_txt})")
-                        if res["key"] == "catboost":
-                            res["ci_debug"] = {
-                                "ci_low": ci.get("ci_low"),
-                                "ci_high": ci.get("ci_high"),
-                                "pred_mean": ci.get("pred_mean"),
-                            }
-                    else:
-                        placeholder.caption("Int. 90% indisponível")
-            if model_errors:
-                itens = []
-                for key, msg in (model_errors or {}).items():
-                    if key == "_geral":
-                        itens.append(msg)
-                    else:
-                        itens.append(f"{MODEL_ALGO_NAMES.get(key, key)}: {msg}")
-                st.info("Modelos indisponíveis ou com erro: " + "; ".join(itens))
-            carga_diag = avaliar_carga_operacional_ideal(
-                st.session_state.get("dAmostras"),
-                loja_nome_alvo_submit,
-                fator_monotonia,
-                dias_operacionais_ativos,
-                cluster_values,
-                horas_loja,
-                tmedio_min_atend,
-                horas_por_colab,
+            resultados_modelos = [res for res in resultados_modelos if res.get("key") == "catboost"]
+        if model_bundle_ideal is not None:
+            resultados_modelos_ideal, model_errors_ideal = gerar_resultados_modelos(
+                model_bundle_ideal,
+                train_df,
+                features_input,
+                "ideal",
+                horas_disp,
                 margem,
-                ocupacao_alvo,
-                absenteismo,
-                sla_buffer,
+                anchor_quantile=anchor_quantile,
             )
-            if carga_diag.get("fallback"):
-                st.info("Não foi possível estimar a carga pelos processos; usando fluxo simplificado.")
-        elif modo_calc == "Ideal (Simplificado)":
-            sim_inputs = st.session_state.get("sim_inputs", {})
-            processos_freq_dict = st.session_state.get("sim_processos_freq", {}) or {}
-            tempo_loja_dict = st.session_state.get("sim_processos_tempos_loja", {}) or {}
-            tempo_global_dict = st.session_state.get("sim_processos_tempos_global", {}) or {}
-            tempo_custom_dict = st.session_state.get("sim_processos_tempos_custom", {}) or {}
-            if tempo_custom_dict:
-                tempo_loja_dict = dict(tempo_loja_dict)
-                tempo_global_dict = dict(tempo_global_dict)
-                for proc_norm, tempo_val in tempo_custom_dict.items():
-                    try:
-                        tempo_float = float(tempo_val)
-                    except Exception:
-                        continue
-                    tempo_float = max(0.0, tempo_float)
-                    tempo_loja_dict[proc_norm] = tempo_float
-                    tempo_global_dict[proc_norm] = tempo_float
-            estrutura_flags = {"Escritorio": int(escritorio), "Copa": int(copa), "Espaco Evento": int(espaco_evento)}
-            result_ideal = calcular_resultado_ideal_simplificado(
-                cluster_values=cluster_values,
-                sim_inputs=sim_inputs,
-                horas_loja=horas_loja,
-                horas_por_colab=horas_por_colab,
-                dias_operacionais_ativos=dias_operacionais_ativos,
-                fator_monotonia=fator_monotonia,
-                margem=margem,
-                sla_buffer=sla_buffer,
-                ocupacao_alvo=ocupacao_alvo,
-                absenteismo=absenteismo,
-                area_total=area_total,
-                qtd_caixas=qtd_caixas,
-                estrutura_flags=estrutura_flags,
-                base_ativa=base_ativa,
-                atividade_er=atividade_er,
-                receita_total=receita_total,
-                reais_por_ativo=reais_por_ativo,
-                pct_retirada_hist=pct_retirada,
-                itens_pedido_hist=itens_pedido,
-                faturamento_hora_hist=cluster_values.get("Faturamento/Hora", 0.0),
-                processos_freq_dict=processos_freq_dict,
-                tempo_loja_dict=tempo_loja_dict,
-                tempo_global_dict=tempo_global_dict,
-            )
-        else:
-            st.error(f"Modo de cálculo não reconhecido: {modo_calc}")
-            result_ideal = None
+            resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
 
-        if modo_calc == "Ideal (Simplificado)" and result_ideal is not None:
-            st.success("Cálculo (Ideal) concluído!")
-            st.metric("Qtd Auxiliares (ideal)", f"{result_ideal['qtd_aux_ideal']}")
-            st.caption(
-                f"Carga: {result_ideal['carga_total_horas']:.2f} h/semana | "
-                f"H/colab efetivo: {result_ideal['horas_por_colaborador']:.2f} h/semana "
-                f"(base {result_ideal.get('horas_por_colaborador_base', result_ideal['horas_por_colaborador']):.2f}) | "
-                f"Ocupação alvo: {result_ideal['ocupacao_alvo']:.2f} | "
-                f"Absenteísmo: {result_ideal['absenteismo']:.2f} | "
-                f"SLA buffer: {result_ideal['sla_buffer']:.2f} | "
-                f"Margem: {result_ideal['margem']:.2f}"
-            )
-            st.caption(
-                f"Carga (fluxo): {result_ideal.get('carga_fluxo', 0.0):.2f} h/sem | "
-                f"Carga (processos extras): {result_ideal.get('carga_processos_extras', 0.0):.2f} h/sem"
-            )
-            st.caption(
-                f"Pedidos/h usados: {result_ideal.get('pedidos_hora_utilizado', 0.0):.2f} | "
-                f"Tempo médio: {result_ideal.get('tmedio_min_atendimento', 0.0):.2f} min | "
-                f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
-            )
+        def _ajustar_pred_hist(pred_val: float) -> tuple[float, Dict[str, float]]:
+            base_abs = float(absenteismo_prefill)
+            base_folga = float(folga_base)
+            fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
+            fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
+            ajuste_total = fator_abs * fator_folga
+            return pred_val * ajuste_total, {
+                "fator_abs": fator_abs,
+                "fator_folga": fator_folga,
+                "ajuste_total": ajuste_total,
+            }
+
+        def _ajustar_pred_ideal(pred_val: float) -> tuple[float, Dict[str, float]]:
+            base_abs = float(absenteismo_prefill)
+            base_folga = float(folga_base)
+            fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
+            fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
+            ajuste_total = fator_abs * fator_folga
+            return pred_val * ajuste_total, {
+                "fator_abs": fator_abs,
+                "fator_folga": fator_folga,
+                "ajuste_total": ajuste_total,
+            }
+
+        cat_hist = resultados_modelos[0] if resultados_modelos else None
+        cat_ideal = resultados_modelos_ideal[0] if resultados_modelos_ideal else None
+
+        if not resultados_modelos:
+            err_msgs = []
+            for key, msg in (model_errors_hist or {}).items():
+                label = MODEL_ALGO_NAMES.get(key, key) if key != "_geral" else "Modelo"
+                err_msgs.append(f"{label}: {msg}")
+            detalhe = "; ".join(err_msgs) if err_msgs else "Faca upload de dEstrutura, dPessoas e (opcional) fIndicadores."
+            st.error(f"Nao ha modelos treinados (Historico). {detalhe}")
+
+        if not resultados_modelos_ideal:
+            err_msgs = []
+            for key, msg in (model_errors_ideal or {}).items():
+                label = MODEL_ALGO_NAMES.get(key, key) if key != "_geral" else "Modelo"
+                err_msgs.append(f"{label}: {msg}")
+            detalhe = "; ".join(err_msgs) if err_msgs else "Faca upload de dEstrutura, dPessoas e fIndicadores suficientes."
+            st.error(f"Nao ha modelos treinados (Ideal). {detalhe}")
+
+        ci_hist = {}
+        ci_ideal = {}
+        if cat_hist:
+            ci_hist = calcular_intervalos_modelos(
+                train_df,
+                features_input,
+                "historico",
+                horas_disp,
+                margem,
+                ["catboost"],
+                anchor_quantile=anchor_quantile,
+            ).get("catboost", {})
+        if cat_ideal:
+            ci_ideal = calcular_intervalos_modelos(
+                train_df,
+                features_input,
+                "ideal",
+                horas_disp,
+                margem,
+                ["catboost"],
+                anchor_quantile=anchor_quantile,
+            ).get("catboost", {})
+
+        if cat_hist and cat_ideal:
+            st.success("Previsao (Machine Learning) concluida!")
+            pred_hist_ajust, _ = _ajustar_pred_hist(float(cat_hist.get("pred") or 0.0))
+            pred_ideal_ajust, _ = _ajustar_pred_ideal(float(cat_ideal.get("pred") or 0.0))
+            diff_val = pred_ideal_ajust - pred_hist_ajust
+            col_res = st.columns(3)
+            with col_res[0]:
+                st.markdown(
+                    f"<div style='text-align:center;'>"
+                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Histórico</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{pred_hist_ajust:.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                if ci_hist:
+                    low_txt = _format_interval_value(ci_hist.get("ci_low_disp", ci_hist.get("ci_low")))
+                    high_txt = _format_interval_value(ci_hist.get("ci_high_disp", ci_hist.get("ci_high")))
+                    st.markdown(
+                        f"<div style='text-align:center;font-size:0.85rem;color:#555;'>IC 95%: {low_txt} - {high_txt}</div>",
+                        unsafe_allow_html=True,
+                    )
+            with col_res[1]:
+                st.markdown(
+                    f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
+                    f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
+                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{pred_ideal_ajust:.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                if ci_ideal:
+                    low_txt = _format_interval_value(ci_ideal.get("ci_low_disp", ci_ideal.get("ci_low")))
+                    high_txt = _format_interval_value(ci_ideal.get("ci_high_disp", ci_ideal.get("ci_high")))
+                    st.markdown(
+                        f"<div style='text-align:center;font-size:0.85rem;color:#555;'>IC 95%: {low_txt} - {high_txt}</div>",
+                        unsafe_allow_html=True,
+                    )
+            with col_res[2]:
+                st.markdown(
+                    f"<div style='text-align:center;'>"
+                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - hist)</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            metrics_info_ideal = cat_ideal.get("metrics") or {}
+            stats_parts: List[str] = []
+            mape_v = metrics_info_ideal.get("MAPE")
+            r2m = metrics_info_ideal.get("R2_mean")
+            precisao = metrics_info_ideal.get("Precisao_percent")
+            mae_v = metrics_info_ideal.get("MAE")
+            rmse_v = metrics_info_ideal.get("RMSE")
+            if _metric_has_value(precisao):
+                stats_parts.append(f"Precisao {precisao:.1f}%")
+            if _metric_has_value(mape_v):
+                stats_parts.append(f"MAPE {mape_v*100:.1f}%")
+            if _metric_has_value(mae_v):
+                stats_parts.append(f"MAE {mae_v:.2f}")
+            if _metric_has_value(rmse_v):
+                stats_parts.append(f"RMSE {rmse_v:.2f}")
+            if _metric_has_value(r2m):
+                stats_parts.append(f"R2 {r2m:.2f}")
+            if stats_parts:
+                st.markdown(
+                    f"<div style='text-align:center;'>Modelo de Machine Learning (ideal): {' | '.join(stats_parts)}</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("Modelo CatBoost indisponivel para historico ou ideal.")
+
+        if model_errors_hist:
+            itens = []
+            for key, msg in (model_errors_hist or {}).items():
+                if key == "_geral":
+                    itens.append(msg)
+                else:
+                    itens.append(f"{MODEL_ALGO_NAMES.get(key, key)}: {msg}")
+            st.info("Modelos indisponiveis ou com erro (Historico): " + "; ".join(itens))
+        if model_errors_ideal:
+            itens = []
+            for key, msg in (model_errors_ideal or {}).items():
+                if key == "_geral":
+                    itens.append(msg)
+                else:
+                    itens.append(f"{MODEL_ALGO_NAMES.get(key, key)}: {msg}")
+            st.info("Modelos indisponiveis ou com erro (Ideal): " + "; ".join(itens))
+    elif modo_simplificado:
+        sim_inputs = st.session_state.get("sim_inputs", {})
+        processos_freq_dict = st.session_state.get("sim_processos_freq", {}) or {}
+        tempo_loja_dict = st.session_state.get("sim_processos_tempos_loja", {}) or {}
+        tempo_global_dict = st.session_state.get("sim_processos_tempos_global", {}) or {}
+        tempo_custom_dict = st.session_state.get("sim_processos_tempos_custom", {}) or {}
+        if tempo_custom_dict:
+            tempo_loja_dict = dict(tempo_loja_dict)
+            tempo_global_dict = dict(tempo_global_dict)
+            for proc_norm, tempo_val in tempo_custom_dict.items():
+                try:
+                    tempo_float = float(tempo_val)
+                except Exception:
+                    continue
+                tempo_float = max(0.0, tempo_float)
+                tempo_loja_dict[proc_norm] = tempo_float
+                tempo_global_dict[proc_norm] = tempo_float
+        estrutura_flags = {"Escritorio": int(escritorio), "Copa": int(copa), "Espaco Evento": int(espaco_evento)}
+        result_ideal = calcular_resultado_ideal_simplificado(
+            cluster_values=cluster_values,
+            sim_inputs=sim_inputs,
+            horas_loja=horas_loja,
+            horas_por_colab=horas_por_colab,
+            dias_operacionais_ativos=dias_operacionais_ativos,
+            fator_monotonia=fator_monotonia,
+            margem=margem,
+            sla_buffer=sla_buffer,
+            ocupacao_alvo=ocupacao_alvo,
+            absenteismo=absenteismo,
+            area_total=area_total,
+            qtd_caixas=qtd_caixas,
+            estrutura_flags=estrutura_flags,
+            base_ativa=base_ativa,
+            atividade_er=atividade_er,
+            receita_total=receita_total,
+            reais_por_ativo=reais_por_ativo,
+            pct_retirada_hist=pct_retirada,
+            itens_pedido_hist=itens_pedido,
+            faturamento_hora_hist=cluster_values.get("Faturamento/Hora", 0.0),
+            processos_freq_dict=processos_freq_dict,
+            tempo_loja_dict=tempo_loja_dict,
+            tempo_global_dict=tempo_global_dict,
+        )
+    else:
+        st.error(f"Modo de calculo nao reconhecido: {modo_calc}")
+        result_ideal = None
+
+    if modo_simplificado and result_ideal is not None:
+        st.success("Calculo (Ideal) concluido!")
+        st.metric("Qtd Auxiliares (ideal)", f"{result_ideal['qtd_aux_ideal']}")
+        st.caption(
+            f"Carga: {result_ideal['carga_total_horas']:.2f} h/semana | "
+            f"H/colab efetivo: {result_ideal['horas_por_colaborador']:.2f} h/semana "
+            f"(base {result_ideal.get('horas_por_colaborador_base', result_ideal['horas_por_colaborador']):.2f}) | "
+            f"Ocupacao alvo: {result_ideal['ocupacao_alvo']:.2f} | "
+            f"Absenteismo: {result_ideal['absenteismo']:.2f} | "
+            f"SLA buffer: {result_ideal['sla_buffer']:.2f} | "
+            f"Margem: {result_ideal['margem']:.2f}"
+        )
+        st.caption(
+            f"Carga (fluxo): {result_ideal.get('carga_fluxo', 0.0):.2f} h/sem | "
+            f"Carga (processos extras): {result_ideal.get('carga_processos_extras', 0.0):.2f} h/sem"
+        )
+        st.caption(
+            f"Pedidos/h usados: {result_ideal.get('pedidos_hora_utilizado', 0.0):.2f} | "
+            f"Tempo medio: {result_ideal.get('tmedio_min_atendimento', 0.0):.2f} min | "
+            f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
+        )
 # Helpers internos
 from src.logic.models.model_fila import (
     estimate_queue_inputs,
