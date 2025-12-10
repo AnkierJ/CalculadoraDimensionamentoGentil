@@ -35,6 +35,7 @@ def _preds_for_loja(
         horas_disp,
         margem,
         anchor_quantile=anchor_quantile,
+        apply_cluster_blend=False,
     )
     preds: Dict[str, float] = {}
     for res in resultados:

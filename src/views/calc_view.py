@@ -365,18 +365,36 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             if has_lookup:
                 base_total_val = get_lookup_value("BaseTotal", ["Base"])
                 base_ativa_val = get_lookup_value("BaseAtiva")
+                a0_val = get_lookup_value("A0")
+                a1aa3_val = get_lookup_value("A1aA3")
+                churn_val = get_lookup_value("Churn")
                 receita_total_val = get_lookup_value("ReceitaTotalMes")
                 reais_por_ativo_val = get_lookup_value("ReaisPorAtivo")
+                atividade_er_val = get_lookup_value("AtividadeER")
+                inicios_val = get_lookup_value("Inicios")
+                reinicios_val = get_lookup_value("Reinicios")
+                recuperados_val = get_lookup_value("Recuperados")
+                i4a_i6_val = get_lookup_value("I4aI6")
             else:
                 base_total_val = 0.0
                 base_ativa_val = 0.0
+                a0_val = 0.0
+                a1aa3_val = 0.0
+                churn_val = 0.0
                 receita_total_val = 0.0
                 reais_por_ativo_val = 0.0
+                atividade_er_val = 0.0
+                inicios_val = 0.0
+                reinicios_val = 0.0
+                recuperados_val = 0.0
+                i4a_i6_val = 0.0
 
-            colIndA, colIndB = st.columns(2)
+            colIndA, colIndB, colIndC = st.columns(3)
             with colIndA:
                 base_total = st.number_input("Base Total", min_value=0.0, step=1.0, value=base_total_val)
                 base_ativa = st.number_input("Base Ativa", min_value=0.0, step=1.0, value=base_ativa_val)
+                a0 = st.number_input("A0", min_value=0.0, step=1.0, value=a0_val)
+                a1aA3 = st.number_input("A1 a A3", min_value=0.0, step=1.0, value=a1aa3_val)
             cluster_targets = [
                 "Pedidos/Hora",
                 "Pedidos/Dia",
@@ -387,16 +405,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             with colIndB:
                 receita_total = st.number_input("Receita Total (R$)", min_value=0.0, step=100.0, value=receita_total_val, format="%.2f")
                 reais_por_ativo = st.number_input("Reais por Ativo (R$)", min_value=0.0, step=1.0, value=reais_por_ativo_val, format="%.2f")
-
-            # Campos não usados no modelo são fixados em zero (removidos do formulário)
-            atividade_er = 0.0
-            churn = 0.0
-            inicios = 0.0
-            reinicios = 0.0
-            recuperados = 0.0
-            i4_a_i6 = 0.0
-            a0 = 0.0
-            a1aA3 = 0.0
+                atividade_er = st.number_input("Atividade ER", min_value=0.0, max_value=100.0, step=0.001, value=atividade_er_val, format="%.3f")
+                churn = st.number_input("Churn", min_value=0.0, max_value=100.0, step=0.001, value=churn_val, format="%.3f")
+            with colIndC:
+                inicios = st.number_input("Inícios", min_value=0.0, step=1.0, value=inicios_val)
+                reinicios = st.number_input("Reinícios", min_value=0.0, step=1.0, value=reinicios_val)
+                recuperados = st.number_input("Recuperados", min_value=0.0, step=1.0, value=recuperados_val)
+                i4_a_i6 = st.number_input("I4 a I6", min_value=0.0, step=1.0, value=i4a_i6_val)
 
             indicadores_ctx = preparar_indicadores_operacionais(
                 base_total=base_total,

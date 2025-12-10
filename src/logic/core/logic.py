@@ -507,13 +507,19 @@ def _get_high_perf_anchor(train_df: pd.DataFrame, q: float = 0.75) -> Optional[f
         return None
 
 
-def _apply_high_perf_cap(y_series: pd.Series, train_df: pd.DataFrame, margem: float) -> pd.Series:
+def _apply_high_perf_cap(
+    y_series: pd.Series,
+    train_df: pd.DataFrame,
+    margem: float,
+    anchor_quantile: Optional[float] = None,
+) -> pd.Series:
     """
     Limita o alvo ideal com base no desempenho das lojas de maior Receita/Aux.
     Evita que o headcount "ideal" extrapole o que seria necessário para atingir
     o nível de eficiência das top lojas.
     """
-    anchor = _get_high_perf_anchor(train_df, q=0.80)
+    q_cap = anchor_quantile if anchor_quantile is not None else 0.80
+    anchor = _get_high_perf_anchor(train_df, q=q_cap)
     if anchor is None or anchor <= 0:
         return y_series
     receita = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
@@ -844,15 +850,27 @@ def make_target(
             anchor_q = 0.60
     anchor_q = max(0.1, min(0.95, float(anchor_q)))
     horas_disp_safe = max(float(horas_disp), 1e-6)
-    receita_mes = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
-    faturamento_hora = pd.to_numeric(train_df.get("Faturamento/Hora"), errors="coerce")
-    horas_op = pd.to_numeric(train_df.get("HorasOperacionais"), errors="coerce")
+    receita_raw = train_df.get("ReceitaTotalMes")
+    receita_mes = pd.to_numeric(
+        receita_raw if isinstance(receita_raw, pd.Series) else pd.Series(receita_raw, index=train_df.index),
+        errors="coerce",
+    )
+    faturamento_raw = train_df.get("Faturamento/Hora")
+    faturamento_hora = pd.to_numeric(
+        faturamento_raw if isinstance(faturamento_raw, pd.Series) else pd.Series(faturamento_raw, index=train_df.index),
+        errors="coerce",
+    )
+    horas_raw = train_df.get("HorasOperacionais")
+    horas_op = pd.to_numeric(
+        horas_raw if isinstance(horas_raw, pd.Series) else pd.Series(horas_raw, index=train_df.index),
+        errors="coerce",
+    )
     horas_op = horas_op.where(horas_op > 0, np.nan)
     receita_est_hora = faturamento_hora * horas_op * WEEKS_PER_MONTH
     base_ativa = pd.to_numeric(train_df.get("BaseAtiva"), errors="coerce")
     reais_por_ativo = pd.to_numeric(train_df.get("ReaisPorAtivo"), errors="coerce")
     receita_est_base = base_ativa * reais_por_ativo / WEEKS_PER_MONTH
-    receita_base = receita_mes
+    receita_base = receita_mes if isinstance(receita_mes, pd.Series) else pd.Series(receita_mes, index=train_df.index)
     receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_hora)
     receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_base)
 
@@ -874,7 +892,7 @@ def make_target(
     mediana_ideal = float(y_ideal.median(skipna=True)) if y_ideal.notna().any() else float(y_hist.median(skipna=True))
     y_ideal = y_ideal.fillna(mediana_ideal)
     # ancora no desempenho das lojas com maior receita por auxiliar (mantém teto de eficiência)
-    y_ideal = _apply_high_perf_cap(y_ideal, train_df, margem)
+    y_ideal = _apply_high_perf_cap(y_ideal, train_df, margem, anchor_quantile=anchor_q)
     return y_ideal.clip(lower=0.0)
 def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.Series:
     """Retorna série com receita (mês ou hora) dividida por auxiliar."""
@@ -1986,13 +2004,22 @@ def gerar_resultados_modelos(
     margem: float,
     algo_order: Optional[List[str]] = None,
     anchor_quantile: Optional[float] = None,
+    apply_cluster_blend: bool = True,
 ) -> Tuple[List[Dict[str, object]], Dict[str, str]]:
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
     algo_sequence = algo_order or MODEL_ALGO_ORDER
     feature_bounds = _feature_bounds_from_train(train_df)
     capped_features = _cap_feature_row(features_input, feature_bounds)
-    cluster_ctx = _compute_porte_cluster_context(train_df, mode=ref_mode, horas_disp=horas_disp, margem=margem, anchor_quantile=anchor_quantile)
+    cluster_ctx = None
+    if apply_cluster_blend and ref_mode == "ideal":
+        cluster_ctx = _compute_porte_cluster_context(
+            train_df,
+            mode=ref_mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            anchor_quantile=anchor_quantile,
+        )
     if not models:
         # mesmo sem modelos carregados, retorne erros conhecidos na ordem esperada
         resultados_stub = []
@@ -2045,7 +2072,9 @@ def gerar_resultados_modelos(
         except Exception as exc:
             model_errors[key] = f"Erro ao prever: {exc}"
             continue
-        pred_ajust, cluster_info = _apply_cluster_blend(capped_features, pred, cluster_ctx)
+        pred_ajust, cluster_info = (pred, None)
+        if cluster_ctx is not None:
+            pred_ajust, cluster_info = _apply_cluster_blend(capped_features, pred, cluster_ctx)
         metrics = (metrics_map or {}).get(key, {}) if metrics_map else {}
         resultados.append(
             {
@@ -2071,11 +2100,20 @@ def calcular_intervalos_modelos(
     n_boot: int = 8,
     quantis: Tuple[int, int] = (5, 95),
     anchor_quantile: Optional[float] = None,
+    apply_cluster_blend: bool = True,
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
     feature_bounds = _feature_bounds_from_train(train_df)
     capped_features = _cap_feature_row(features_input, feature_bounds)
-    cluster_ctx = _compute_porte_cluster_context(train_df, mode=ref_mode, horas_disp=horas_disp, margem=margem, anchor_quantile=anchor_quantile)
+    cluster_ctx = None
+    if apply_cluster_blend and ref_mode == "ideal":
+        cluster_ctx = _compute_porte_cluster_context(
+            train_df,
+            mode=ref_mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            anchor_quantile=anchor_quantile,
+        )
     for key in algo_keys:
         ci = predict_with_uncertainty(
             train_df,
