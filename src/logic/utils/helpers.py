@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import numpy as np
 import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -206,8 +207,8 @@ def get_schema_dPessoas() -> Dict[str, str]:
     }
 
 
-def get_schema_fFaturamento() -> Dict[str, str]:
-    """Schema com os tipos esperados para a planilha fFaturamento."""
+def get_schema_fFaturamento2() -> Dict[str, str]:
+    """Schema com os tipos esperados para a planilha fFaturamento2."""
     return {
         "Loja": "string",
         "CodPedido": "int",
@@ -301,9 +302,16 @@ def _coerce_types(df: pd.DataFrame, schema: Dict[str, str]) -> pd.DataFrame:
                 return str(x).strip()
             df[col] = df[col].map(_to_text).astype("object")
         elif t == "float":
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            numeric = pd.to_numeric(df[col], errors="coerce")
+            mask_nan = numeric.isna()
+            if mask_nan.any():
+                fallback = df.loc[mask_nan, col].apply(lambda v: safe_float(v, np.nan))
+                numeric.loc[mask_nan] = fallback
+            df[col] = numeric.astype(float)
         elif t == "int":
-            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+            numeric = pd.to_numeric(df[col], errors="coerce")
+            # Permite entrada com decimais (ex: "1.0") arredondando para o inteiro mais próximo antes de converter
+            df[col] = numeric.round().astype("Int64")
         elif t == "boolean":
             if df[col].dtype == "bool" or str(df[col].dtype).startswith("boolean"):
                 df[col] = df[col].astype("boolean")

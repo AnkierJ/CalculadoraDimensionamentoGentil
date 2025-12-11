@@ -19,7 +19,6 @@ try:
 except ImportError:
     variance_inflation_factor = None
 from ..models.model_catboost import CatBoostQuantileModel, predict_catboost, train_catboost_model
-from ..models.model_xgboost import predict_xgboost, train_xgboost_model
 from ..models.model_fila import (
     DEFAULT_OCUPACAO_ALVO,
     diagnosticar_fila,
@@ -41,7 +40,7 @@ from ..utils.helpers import (
     get_schema_dAmostras,
     get_schema_dEstrutura,
     get_schema_dPessoas,
-    get_schema_fFaturamento,
+    get_schema_fFaturamento2,
     get_schema_fIndicadores,
     image_to_base64,
     normalize_processo_nome,
@@ -58,7 +57,6 @@ from ..utils.metrics import (
     r2,
     rmse,
     smape,
-    intervalo_90_bootstrap,
     intervalo_90_catboost,
 )
 from ..data.buscaDeLojas import (
@@ -484,10 +482,9 @@ FEATURE_COLUMNS = [
 CONT = ["Area Total","Qtd Caixas","Pedidos/Hora","Pedidos/Dia",
         "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva","ReaisPorAtivo",
         "%Ativos","TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
-MODEL_ALGO_ORDER = ["catboost", "xgboost"]
+MODEL_ALGO_ORDER = ["catboost"]
 MODEL_ALGO_NAMES = {
     "catboost": "CatBoostRegressor",
-    "xgboost": "XGBoostRegressor",
 }
 
 
@@ -705,11 +702,11 @@ def train_auxiliares_model(
     mode: str = "historico",
     horas_disp: float = 6.0,
     margem: float = 0.15,
-    algo: str = "xgboost",
+    algo: str = "catboost",
     prepared: Optional[Tuple[pd.DataFrame, pd.Series, List[str], pd.Series]] = None,
     anchor_quantile: Optional[float] = None,
 ) -> Optional[object]:
-    """Treina o modelo solicitado (CatBoost ou XGBoost) usando pipelines padronizados."""
+    """Treina o modelo (CatBoost) usando pipelines padronizados."""
     if prepared is None:
         prepared = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared is None:
@@ -721,7 +718,7 @@ def train_auxiliares_model(
         sample_weights = sample_weights.reindex(X.index).fillna(1.0)
     else:
         sample_weights = pd.Series(1.0, index=X.index, dtype="float64")
-    algo = (algo or "xgboost").lower()
+    algo = (algo or "catboost").lower()
     numeric_cols = X.attrs.get("numeric_features")
     categorical_cols = X.attrs.get("categorical_features")
     if numeric_cols is None or categorical_cols is None:
@@ -736,17 +733,7 @@ def train_auxiliares_model(
             categorical_cols=categorical_cols or [],
             sample_weights=sample_weights,
         )
-    if algo == "xgboost":
-        return train_xgboost_model(
-            X=X,
-            y=y,
-            used_features=used_features,
-            numeric_cols=numeric_cols or [],
-            categorical_cols=categorical_cols or [],
-            sample_weights=sample_weights,
-            categorical_cardinality=cat_cardinality,
-        )
-    raise ValueError(f"Algoritmo '{algo}' n?o suportado.")
+    raise ValueError(f"Algoritmo '{algo}' não suportado.")
 def _determine_test_fraction(n_samples: int, desired: float) -> float:
     """Ajusta o percentual da base de teste garantindo pelo menos 1 observação."""
     if n_samples <= 1:
@@ -936,10 +923,9 @@ def predict_qtd_auxiliares(
     is_catboost = isinstance(model, CatBoostQuantileModel) or ("catboost" in model.__class__.__module__.lower()) or (
         "catboost" in model_name
     )
-    if is_catboost:
-        pred_result = predict_catboost(model, feature_row)
-    else:
-        pred_result = predict_xgboost(model, feature_row)
+    if not is_catboost:
+        raise ValueError("Apenas CatBoost é suportado.")
+    pred_result = predict_catboost(model, feature_row)
     pred = float(pred_result.get("pred", np.nan))
     if not math.isfinite(pred):
         raise ValueError("Predicao invalida (NaN/inf).")
@@ -1082,9 +1068,9 @@ def evaluate_model_cv(
     horas_disp: float = 6.0,
     margem: float = 0.15,
     anchor_quantile: Optional[float] = None,
-    algo: Optional[str] = "xgboost",
+    algo: Optional[str] = "catboost",
 ) -> Dict[str, object]:
-    """Executa avaliacao hold-out compartilhada entre os modelos."""
+    """Executa avaliacao hold-out para o CatBoost."""
     _ = n_splits
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
@@ -1096,34 +1082,33 @@ def evaluate_model_cv(
     split = _split_train_test_data(X_full, y_full, sample_weights, test_size=0.25, random_state=42)
     if split is None:
         return {}
-    algo_list = [algo.lower()] if algo else MODEL_ALGO_ORDER
+    algo_name = (algo or "catboost").lower()
     metrics_map: Dict[str, object] = {}
-    for algo_name in algo_list:
-        try:
-            model = train_auxiliares_model(
-                train_df,
-                mode=mode,
-                horas_disp=horas_disp,
-                margem=margem,
-                algo=algo_name,
-                prepared=(split['X_train'], split['y_train'], used_features, split.get('sample_weight_train')),
-                anchor_quantile=anchor_quantile,
-            )
-        except Exception as exc:
-            metrics_map[algo_name] = {'error': str(exc)}
-            continue
+    try:
+        model = train_auxiliares_model(
+            train_df,
+            mode=mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            algo=algo_name,
+            prepared=(split['X_train'], split['y_train'], used_features, split.get('sample_weight_train')),
+            anchor_quantile=anchor_quantile,
+        )
+    except Exception as exc:
+        metrics_map[algo_name] = {'error': str(exc)}
+    else:
         if model is None:
             metrics_map[algo_name] = {'error': 'Modelo indisponivel para avaliacao.'}
-            continue
-        metrics_map[algo_name] = evaluate_trained_model(
-            MODEL_ALGO_NAMES.get(algo_name, algo_name),
-            model,
-            split['X_test'],
-            split['y_test'],
-        )
-    if algo:
-        return metrics_map.get(algo_list[0], {})
-    return metrics_map
+        else:
+            metrics_map[algo_name] = evaluate_trained_model(
+                MODEL_ALGO_NAMES.get(algo_name, algo_name),
+                model,
+                split['X_test'],
+                split['y_test'],
+            )
+    if algo is None:
+        return metrics_map
+    return metrics_map.get(algo_name, {})
 def predict_with_uncertainty(
     train_df: pd.DataFrame,
     feature_row: Dict[str, object],
@@ -1133,91 +1118,39 @@ def predict_with_uncertainty(
     horas_disp: float = 6.0,
     margem: float = 0.15,
     anchor_quantile: Optional[float] = None,
-    algo: str = "xgboost",
+    algo: str = "catboost",
 ) -> Dict[str, float]:
-    """Aplica bootstrap (XGBoost) ou quantile regression (CatBoost) para estimar o IC de 98% pré-fila."""
+    """Aplica quantile regression do CatBoost para estimar o IC de 98% pré-fila."""
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
     prepared_full = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared_full is None:
         return {}
-    if algo == "catboost":
-        model_cat = train_auxiliares_model(
-            train_df,
-            mode=mode,
-            horas_disp=horas_disp,
-            margem=margem,
-            algo="catboost",
-            prepared=prepared_full,
-            anchor_quantile=anchor_quantile,
-        )
-        if not isinstance(model_cat, CatBoostQuantileModel):
-            return {}
-        try:
-            low_raw, mid_raw, high_raw = model_cat.predict_quantiles_from_row(feature_row)
-        except Exception:
-            return {}
-        interval = intervalo_90_catboost(low_raw, mid_raw, high_raw)
-        return {
-            **interval,
-            "ci_label": "Int. 98% (CatBoost pré-fila)",
-            "ci_low_raw": interval["ci_low"],
-            "ci_high_raw": interval["ci_high"],
-            "ci_low_raw_disp": None,
-            "ci_high_raw_disp": None,
-            "ci_mid_raw_disp": interval.get("ci_mid_disp"),
-            "ci_label_raw": None,
-        }
-    X_full, y_full, used_features, sample_weights_full = prepared_full
-    if isinstance(sample_weights_full, pd.Series):
-        sw_series = sample_weights_full.reindex(X_full.index).fillna(1.0)
-    else:
-        sw_series = pd.Series(1.0, index=X_full.index, dtype="float64")
-    n_rows = len(X_full)
-    if n_rows == 0:
+    model_cat = train_auxiliares_model(
+        train_df,
+        mode=mode,
+        horas_disp=horas_disp,
+        margem=margem,
+        algo="catboost",
+        prepared=prepared_full,
+        anchor_quantile=anchor_quantile,
+    )
+    if not isinstance(model_cat, CatBoostQuantileModel):
         return {}
-    n_boot_eff = min(n_boot, 40 if n_rows >= 40 else 25)
-    rng = np.random.default_rng()
-    preds_raw: List[float] = []
-    for _ in range(n_boot_eff):
-        sample_idx = rng.integers(0, n_rows, n_rows)
-        X_sample = X_full.iloc[sample_idx].copy()
-        X_sample.attrs.update(getattr(X_full, "attrs", {}))
-        y_sample = y_full.iloc[sample_idx].copy()
-        sw_sample = sw_series.iloc[sample_idx].copy()
-        prepared_boot = (X_sample, y_sample, used_features, sw_sample)
-        model_b = train_auxiliares_model(
-            train_df,
-            mode=mode,
-            horas_disp=horas_disp,
-            margem=margem,
-            algo=algo,
-            prepared=prepared_boot,
-            anchor_quantile=anchor_quantile,
-        )
-        if model_b is None:
-            continue
-        try:
-            raw_val = predict_qtd_auxiliares(
-                model_b,
-                feature_row,
-                with_queue_adjustment=False,
-            )
-        except Exception:
-            continue
-        preds_raw.append(raw_val)
-    if not preds_raw:
+    try:
+        low_raw, mid_raw, high_raw = model_cat.predict_quantiles_from_row(feature_row)
+    except Exception:
         return {}
-    interval = intervalo_90_bootstrap(preds_raw, q=q)
+    interval = intervalo_90_catboost(low_raw, mid_raw, high_raw)
     return {
         **interval,
-        "ci_label": "Int. 90% (bootstrap pré-fila)",
-        "ci_low_raw": float(interval.get("ci_low", np.nan)),
-        "ci_high_raw": float(interval.get("ci_high", np.nan)),
+        "ci_label": "Int. 98% (CatBoost pré-fila)",
+        "ci_low_raw": interval["ci_low"],
+        "ci_high_raw": interval["ci_high"],
         "ci_low_raw_disp": None,
         "ci_high_raw_disp": None,
-        "ci_mid_raw_disp": float(interval.get("ci_mid_disp", np.nan)) if interval else None,
+        "ci_mid_raw_disp": interval.get("ci_mid_disp"),
         "ci_label_raw": None,
     }
 # =============================================================================
@@ -1693,7 +1626,7 @@ def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.Dat
         "dAmostras": get_schema_dAmostras,
         "dEstrutura": get_schema_dEstrutura,
         "dPessoas": get_schema_dPessoas,
-        "fFaturamento": get_schema_fFaturamento,
+        "fFaturamento2": get_schema_fFaturamento2,
         "fIndicadores": get_schema_fIndicadores,
     }
     schema_fn = schema_map[schema_name]
@@ -1994,7 +1927,7 @@ def calcular_freq_processos_simulacao(
         dias_operacionais=dias_operacionais,
     )
     return pedidos_semana_ui, auto_freqs
-# Movido de app.py: executa as previsões dos modelos treinados (CatBoost/XGBoost etc.).
+# Movido de app.py: executa as previsões dos modelos treinados (CatBoost).
 def gerar_resultados_modelos(
     model_bundle: Optional[Dict[str, object]],
     train_df: pd.DataFrame,
@@ -2005,6 +1938,7 @@ def gerar_resultados_modelos(
     algo_order: Optional[List[str]] = None,
     anchor_quantile: Optional[float] = None,
     apply_cluster_blend: bool = True,
+    compute_metrics: bool = True,
 ) -> Tuple[List[Dict[str, object]], Dict[str, str]]:
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
@@ -2037,15 +1971,17 @@ def gerar_resultados_modelos(
                     }
                 )
         return resultados_stub, model_errors
-    metrics_map = evaluate_model_cv(
-        train_df,
-        n_splits=5,
-        mode=ref_mode,
-        horas_disp=horas_disp,
-        margem=margem,
-        anchor_quantile=anchor_quantile,
-        algo=None,
-    )
+    metrics_map: Dict[str, Dict[str, float]] = {}
+    if compute_metrics:
+        metrics_map = evaluate_model_cv(
+            train_df,
+            n_splits=5,
+            mode=ref_mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            anchor_quantile=anchor_quantile,
+            algo=None,
+        )
     resultados: List[Dict[str, object]] = []
     for key in algo_sequence:
         modelo_atual = models.get(key)

@@ -20,8 +20,8 @@ if "dEstrutura" not in st.session_state:
     st.session_state["dEstrutura"] = _load_with_version(f"{DATA_DIR}/dEstrutura.csv", "dEstrutura")
 if "dPessoas" not in st.session_state:
     st.session_state["dPessoas"] = _load_with_version(f"{DATA_DIR}/dPessoas.csv", "dPessoas")
-if "fFaturamento" not in st.session_state:
-    st.session_state["fFaturamento"] = _load_with_version(f"{DATA_DIR}/fFaturamento.csv", "fFaturamento")
+if "fFaturamento2" not in st.session_state:
+    st.session_state["fFaturamento2"] = _load_with_version(f"{DATA_DIR}/fFaturamento2.csv", "fFaturamento2")
 if "fIndicadores" not in st.session_state:
     st.session_state["fIndicadores"] = _load_with_version(f"{DATA_DIR}/fIndicadores.csv", "fIndicadores")
 
@@ -29,13 +29,13 @@ if "fIndicadores" not in st.session_state:
 path_amostras = DATA_DIR / "dAmostras.csv"
 path_estrutura = DATA_DIR / "dEstrutura.csv"
 path_pessoas = DATA_DIR / "dPessoas.csv"
-path_faturamento = DATA_DIR / "fFaturamento.csv"
+path_faturamento = DATA_DIR / "fFaturamento2.csv"
 path_indicadores = DATA_DIR / "fIndicadores.csv"
 paths = {
     "dAmostras": path_amostras,
     "dEstrutura": path_estrutura,
     "dPessoas": path_pessoas,
-    "fFaturamento": path_faturamento,
+    "fFaturamento2": path_faturamento,
     "fIndicadores": path_indicadores,
 }
 

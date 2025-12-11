@@ -1,7 +1,7 @@
 # Aba "Dados de Base" – Upload, validação e preparo
 
 ## 1. Objetivo
-Centralizar a documentação do fluxo de ingestão dos arquivos `dAmostras`, `dEstrutura`, `dPessoas`, `fIndicadores`, `fFaturamento`. Essa aba garante que o usuário entenda quais colunas são obrigatórias e como os dados são usados no restante da calculadora.
+Centralizar a documentação do fluxo de ingestão dos arquivos `dAmostras`, `dEstrutura`, `dPessoas`, `fIndicadores`, `fFaturamento2`. Essa aba garante que o usuário entenda quais colunas são obrigatórias e como os dados são usados no restante da calculadora.
 
 ## 2. Fluxo atual
 1. **Upload / arraste-e-solte**: cada dataset tem um componente `st.file_uploader`.
@@ -17,7 +17,7 @@ Centralizar a documentação do fluxo de ingestão dos arquivos `dAmostras`, `dE
 - **dEstrutura**: identificação da loja (`Loja`, `BCPS`, `SAP`), atributos físicos (área, caixas, horários), alocação atual de auxiliares.
 - **dPessoas**: `QtdAux`, disponibilidade, eventuais campos de absenteísmo.
 - **fIndicadores**: métricas comerciais (Base Ativa, Receita, Pedidos, I4–I6, etc.).
-- **dAmostras** / **fFaturamento**: usados para diagnósticos e inferência de tempos médios quando ausentes.
+- **dAmostras** / **fFaturamento2**: usados para diagnósticos e inferência de tempos médios quando ausentes.
 
 ## 4. Sugestões de organização adicional
 - Criar um `docs/esquema_dados.md` que liste coluna por coluna, indicando:
@@ -25,4 +25,3 @@ Centralizar a documentação do fluxo de ingestão dos arquivos `dAmostras`, `dE
   - Obrigatoriedade.
   - Funções que a utilizam (por ex.: `DiasOperacionais` → `prepare_training_dataframe`, `modelo_fila`).
 - Extrair para `src/data/ingest.py` os utilitários de leitura/validação (hoje espalhados em `logic.py`), deixando `app.py` responsável apenas pela camada de UI.
-

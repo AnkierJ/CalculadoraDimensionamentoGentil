@@ -9,7 +9,7 @@ from src.logic.core.logic import (
     get_schema_dAmostras,
     get_schema_dEstrutura,
     get_schema_dPessoas,
-    get_schema_fFaturamento,
+    get_schema_fFaturamento2,
     get_schema_fIndicadores,
     render_append,
 )
@@ -42,13 +42,13 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                     st.write(f"📦 Tamanho de dPessoas.csv: {path.stat().st_size:,} bytes")
                 else:
                     st.warning("Arquivo dPessoas.csv não encontrado.")
-            with st.expander("fFaturamento"):
-                st.dataframe(st.session_state["fFaturamento"].head(10), use_container_width=True)
-                path = paths.get("fFaturamento")
+            with st.expander("fFaturamento2"):
+                st.dataframe(st.session_state["fFaturamento2"].head(10), use_container_width=True)
+                path = paths.get("fFaturamento2")
                 if path and path.exists():
-                    st.write(f"📦 Tamanho de fFaturamento.csv: {path.stat().st_size:,} bytes")
+                    st.write(f"📦 Tamanho de fFaturamento2.csv: {path.stat().st_size:,} bytes")
                 else:
-                    st.warning("Arquivo fFaturamento.csv não encontrado.")
+                    st.warning("Arquivo fFaturamento2.csv não encontrado.")
             with st.expander("fIndicadores"):
                 st.dataframe(st.session_state["fIndicadores"].head(10), use_container_width=True)
                 path = paths.get("fIndicadores")
@@ -63,7 +63,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                     st.session_state["downloads_ready"] = True
 
             if st.session_state.get("downloads_ready"):
-                for nome in ["dAmostras", "dEstrutura", "dPessoas", "fFaturamento", "fIndicadores"]:
+                for nome in ["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"]:
                     df = st.session_state[nome]
                     csv_bytes = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
                     st.download_button(
@@ -76,7 +76,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
 
         with aba_upload:
             st.caption("Envie arquivos para ACRESCENTAR dados à base atual. Entradas duplicadas são deduplicadas por chaves básicas.")
-            tabs = st.tabs(["dAmostras", "dEstrutura", "dPessoas", "fFaturamento", "fIndicadores"])
+            tabs = st.tabs(["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"])
             with tabs[0]:
                 render_append("dAmostras", get_schema_dAmostras, ["Loja", "Processo", "Amostra"])
             with tabs[1]:
@@ -84,6 +84,6 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
             with tabs[2]:
                 render_append("dPessoas", get_schema_dPessoas, ["Loja"])
             with tabs[3]:
-                render_append("fFaturamento", get_schema_fFaturamento, ["Loja", "CodPedido"])
+                render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "CodPedido"])
             with tabs[4]:
                 render_append("fIndicadores", get_schema_fIndicadores, ["Loja"])

@@ -36,6 +36,8 @@ def _preds_for_loja(
         margem,
         anchor_quantile=anchor_quantile,
         apply_cluster_blend=False,
+        compute_metrics=False,  # evita CV pesado repetido no comparativo
+        algo_order=["catboost"],  # usa apenas o modelo exibido
     )
     preds: Dict[str, float] = {}
     for res in resultados:
@@ -114,7 +116,6 @@ def render_comparativo_tab(tab_container) -> None:
         else:
             summary_text = "Seleções múltiplas"
             show_summary_only = True
-        print(display_count)
         
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
@@ -232,6 +233,15 @@ def render_comparativo_tab(tab_container) -> None:
             if not feature_row:
                 continue
             loja_display = str(feature_row.get("Loja", loja_nome)).strip() or loja_nome
+            def _round_int(val: Optional[float]) -> Optional[int]:
+                try:
+                    f = float(val)
+                    if pd.isna(f):
+                        return None
+                    return int(round(f))
+                except Exception:
+                    return None
+
             qtd_aux_real = None
             if pessoas_norm is not None and not pessoas_norm.empty:
                 pessoas_row, _ = _get_loja_row(pessoas_norm, loja_nome)
@@ -244,21 +254,24 @@ def render_comparativo_tab(tab_container) -> None:
             if qtd_hist is None:
                 qtd_hist = safe_float(feature_row.get("QtdAux"))
             qtd_ideal = preds_ideal.get("catboost")
+            qtd_aux_real_i = _round_int(qtd_aux_real)
+            qtd_hist_i = _round_int(qtd_hist)
+            qtd_ideal_i = _round_int(qtd_ideal)
 
             receita = safe_float(feature_row.get("ReceitaTotalMes"))
             receita_por_aux_real = None
-            if receita and qtd_aux_real and qtd_aux_real > 0:
-                receita_por_aux_real = receita / qtd_aux_real
+            if receita and qtd_aux_real_i and qtd_aux_real_i > 0:
+                receita_por_aux_real = receita / qtd_aux_real_i
 
             delta_ideal = None
-            if qtd_ideal is not None and qtd_hist is not None:
-                delta_ideal = float(qtd_ideal) - float(qtd_hist)
+            if qtd_ideal_i is not None and qtd_hist_i is not None:
+                delta_ideal = int(qtd_ideal_i - qtd_hist_i)
             linhas_comp.append(
                 {
                     "Loja": loja_display,
-                    "Qtd Aux Real": qtd_aux_real,
-                    "Qtd Aux Historico": qtd_hist,
-                    "Qtd Aux Ideal": qtd_ideal,
+                    "Qtd Aux Real": qtd_aux_real_i,
+                    "Qtd Aux Historico": qtd_hist_i,
+                    "Qtd Aux Ideal": qtd_ideal_i,
                     "Diferença": delta_ideal,
                     "Faturamento/Qtd Aux Real": receita_por_aux_real,
                     "Porte": porte_label,

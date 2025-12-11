@@ -8,7 +8,7 @@ def set_page_config() -> None:
     st.set_page_config(
         page_title="KALK ⱽᴰ",
         page_icon="src/assets/iconKALK.svg",
-        layout="centered",
+        layout="wide",  # ocupar toda a largura da viewport
     )
 
 
@@ -17,6 +17,22 @@ def inject_global_styles() -> None:
     st.markdown(
         """
     <style>
+        /* Reduz padding e remove limite de largura do container principal */
+        .main .block-container,
+        [data-testid="block-container"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding-left: 120px !important;
+            padding-right: 120px !important;
+        }
+        /* Ajusta barras laterais (sidebar) */
+        [data-testid="stSidebar"] {
+            width: 240px;
+        }
+        [data-testid="stSidebar"] > div:first-child {
+            padding-left: 0.8rem;
+            padding-right: 0.8rem;
+        }
         /* Forçar o radio a ocupar 100% */
         .stRadio > div {
             width: 100% !important;
@@ -80,7 +96,7 @@ def render_tutorial() -> None:
             - `dAmostras`: tempos médios por processo.
             - `dEstrutura`: área, prateleiras, caixas e horários de operação.
             - `dPessoas`: quadro atual de auxiliares e líderes.
-            - `fFaturamento`: dados de pedidos, itens e faturamento.
+            - `fFaturamento2`: dados de pedidos, itens e faturamento.
             - `fIndicadores`: métricas comerciais (%Ativos, taxas, faturamento/hora etc.).
 
         - **2️⃣ Escolha o modo de cálculo:**

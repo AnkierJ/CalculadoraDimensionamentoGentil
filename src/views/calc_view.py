@@ -90,6 +90,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         # Pesquisa de loja
         st.markdown("**Pesquisar loja existente (opcional)**")
         col_lookup = st.columns([1, 1, 1])
+        def _trigger_lookup_enter():
+            st.session_state["lookup_enter_trigger"] = True
         with col_lookup[0]:
             lookup_field = st.radio(
                 "",
@@ -104,15 +106,28 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         df_pessoas = st.session_state.get("dPessoas")
         if lookup_field in ("BCPS", "SAP"):
             with col_lookup[1]:
-                lookup_code = st.text_input("", placeholder=(f"Código ({lookup_field})"), key="lookup_code", label_visibility="collapsed")
+                lookup_code = st.text_input(
+                    "",
+                    placeholder=(f"Código ({lookup_field})"),
+                    key="lookup_code",
+                    label_visibility="collapsed",
+                    on_change=_trigger_lookup_enter,
+                )
         elif lookup_field == "Loja":
             with col_lookup[1]:
-                _ = st.text_input("", placeholder="Nome da loja", key="lookup_loja_input", label_visibility="collapsed")
+                _ = st.text_input(
+                    "",
+                    placeholder="Nome da loja",
+                    key="lookup_loja_input",
+                    label_visibility="collapsed",
+                    on_change=_trigger_lookup_enter,
+                )
             lookup_code = st.session_state.get("lookup_loja_input", "")
 
         with col_lookup[2]:
             lookup_submit = st.button("Pesquisar", use_container_width=True)
-        if lookup_submit:
+        lookup_trigger = bool(lookup_submit or st.session_state.pop("lookup_enter_trigger", False))
+        if lookup_trigger:
             if ((df_ind is None or df_ind.empty) and (df_estrutura is None or df_estrutura.empty)):
                 st.warning("⚠️ Bases de indicadores e de estrutura não estão carregadas.")
             elif not lookup_field or not lookup_code:
@@ -402,7 +417,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 "%Retirada",
             ]
             with colIndB:
-                receita_total = st.number_input("Receita Total (R$)", min_value=0.0, step=100.0, value=receita_total_val, format="%.2f")
+                receita_total = st.number_input("Receita Total / Mês (R$)", min_value=0.0, step=100.0, value=receita_total_val, format="%.2f")
                 reais_por_ativo = st.number_input("Reais por Ativo (R$)", min_value=0.0, step=1.0, value=reais_por_ativo_val, format="%.2f")
                 atividade_er = st.number_input("Atividade ER", min_value=0.0, max_value=100.0, step=0.001, value=atividade_er_val, format="%.3f")
                 churn = st.number_input("Churn", min_value=0.0, max_value=100.0, step=0.001, value=churn_val, format="%.3f")
@@ -649,7 +664,17 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.session_state["sim_processos_freq"] = updated_freqs
                 st.session_state["sim_processos_auto_freq"] = auto_freqs
  
+            mostrar_metricas = False
             col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                if modo_ml:
+                    # espaçamento para alinhar verticalmente com o slider ao lado
+                    st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
+                    mostrar_metricas = st.checkbox(
+                        "Mostrar métricas/IC",
+                        value=False,
+                        help="Ative apenas se precisar das métricas e intervalos de confiança. Mantendo desativado o cálculo fica mais rápido.",
+                    )
             with col2:
 
                 if modo_ml:
@@ -662,7 +687,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
                         value=int(st.session_state.get("anchor_rpa_percent", 60)),
 
-                        help="Percentil de receita por auxiliar usado como refer?ncia: se a meta ? evitar falta de gente, prefira percentil mais baixo; se a meta ? efici?ncia agressiva, prefira percentil mais alto.",
+                        help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, prefira percentil mais alto.",
 
                     )
 
@@ -769,6 +794,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 horas_disp,
                 margem,
                 anchor_quantile=anchor_quantile,
+                compute_metrics=mostrar_metricas,
             )
             resultados_modelos = [res for res in resultados_modelos if res.get("key") == "catboost"]
         if model_bundle_ideal is not None:
@@ -780,6 +806,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 horas_disp,
                 margem,
                 anchor_quantile=anchor_quantile,
+                compute_metrics=mostrar_metricas,
             )
             resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
 
@@ -828,7 +855,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
         ci_hist = {}
         ci_ideal = {}
-        if cat_hist:
+        if mostrar_metricas and cat_hist:
             ci_hist = calcular_intervalos_modelos(
                 train_df,
                 features_input,
@@ -838,7 +865,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 ["catboost"],
                 anchor_quantile=anchor_quantile,
             ).get("catboost", {})
-        if cat_ideal:
+        if mostrar_metricas and cat_ideal:
             ci_ideal = calcular_intervalos_modelos(
                 train_df,
                 features_input,
@@ -853,13 +880,16 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             st.success("Previsao (Machine Learning) concluida!")
             pred_hist_ajust, _ = _ajustar_pred_hist(float(cat_hist.get("pred") or 0.0))
             pred_ideal_ajust, _ = _ajustar_pred_ideal(float(cat_ideal.get("pred") or 0.0))
+            pred_hist_int = int(round(pred_hist_ajust))
+            pred_ideal_int = int(round(pred_ideal_ajust))
             diff_val = pred_ideal_ajust - pred_hist_ajust
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Histórico</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{pred_hist_ajust:.2f} aux</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{pred_hist_int} auxiliares</div>"
+                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_ajust:.2f} aux</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -874,7 +904,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
                     f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
-                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{pred_ideal_ajust:.2f} aux</div>"
+                    f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} auxiliares</div>"
+                    f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_ajust:.2f} aux)</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -889,32 +920,33 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - hist)</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} aux</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} auxiliares</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-            metrics_info_ideal = cat_ideal.get("metrics") or {}
-            stats_parts: List[str] = []
-            mape_v = metrics_info_ideal.get("MAPE")
-            r2m = metrics_info_ideal.get("R2_mean")
-            precisao = metrics_info_ideal.get("Precisao_percent")
-            mae_v = metrics_info_ideal.get("MAE")
-            rmse_v = metrics_info_ideal.get("RMSE")
-            if _metric_has_value(precisao):
-                stats_parts.append(f"Precisao {precisao:.1f}%")
-            if _metric_has_value(mape_v):
-                stats_parts.append(f"MAPE {mape_v*100:.1f}%")
-            if _metric_has_value(mae_v):
-                stats_parts.append(f"MAE {mae_v:.2f}")
-            if _metric_has_value(rmse_v):
-                stats_parts.append(f"RMSE {rmse_v:.2f}")
-            if _metric_has_value(r2m):
-                stats_parts.append(f"R2 {r2m:.2f}")
-            if stats_parts:
-                st.markdown(
-                    f"<div style='text-align:center;'>Modelo de Machine Learning (ideal): {' | '.join(stats_parts)}</div>",
-                    unsafe_allow_html=True,
-                )
+            if mostrar_metricas:
+                metrics_info_ideal = cat_ideal.get("metrics") or {}
+                stats_parts: List[str] = []
+                mape_v = metrics_info_ideal.get("MAPE")
+                r2m = metrics_info_ideal.get("R2_mean")
+                precisao = metrics_info_ideal.get("Precisao_percent")
+                mae_v = metrics_info_ideal.get("MAE")
+                rmse_v = metrics_info_ideal.get("RMSE")
+                if _metric_has_value(precisao):
+                    stats_parts.append(f"Precisao {precisao:.1f}%")
+                if _metric_has_value(mape_v):
+                    stats_parts.append(f"MAPE {mape_v*100:.1f}%")
+                if _metric_has_value(mae_v):
+                    stats_parts.append(f"MAE {mae_v:.2f}")
+                if _metric_has_value(rmse_v):
+                    stats_parts.append(f"RMSE {rmse_v:.2f}")
+                if _metric_has_value(r2m):
+                    stats_parts.append(f"R2 {r2m:.2f}")
+                if stats_parts:
+                    st.markdown(
+                        f"<div style='text-align:center;'>Modelo de Machine Learning (ideal): {' | '.join(stats_parts)}</div>",
+                        unsafe_allow_html=True,
+                    )
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
 
