@@ -983,7 +983,43 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
     if modo_simplificado and result_ideal is not None:
         st.success("Calculo (Ideal) concluido!")
-        st.metric("Qtd Auxiliares (ideal)", f"{result_ideal['qtd_aux_ideal']}")
+
+        qtd_aux_atual = None
+        lookup_row = st.session_state.get("lookup_row")
+        if st.session_state.get("lookup_found") and isinstance(lookup_row, dict):
+            qtd_aux_atual = safe_float(get_lookup(lookup_row, "QtdAux"))
+
+        ideal_val = float(result_ideal.get("qtd_aux_ideal", 0.0))
+        if qtd_aux_atual is not None and not math.isnan(qtd_aux_atual):
+            diff_val = ideal_val - float(qtd_aux_atual)
+            col_res = st.columns(3)
+            with col_res[0]:
+                st.markdown(
+                    f"<div style='text-align:center;'>"
+                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Atual</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{qtd_aux_atual:.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with col_res[1]:
+                st.markdown(
+                    f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
+                    f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
+                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{ideal_val:.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with col_res[2]:
+                st.markdown(
+                    f"<div style='text-align:center;'>"
+                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - atual)</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} aux</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.metric("Qtd Auxiliares (ideal)", f"{ideal_val}")
+
         st.caption(
             f"Carga: {result_ideal['carga_total_horas']:.2f} h/semana | "
             f"H/colab efetivo: {result_ideal['horas_por_colaborador']:.2f} h/semana "

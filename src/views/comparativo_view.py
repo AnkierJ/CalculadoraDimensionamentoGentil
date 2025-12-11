@@ -50,18 +50,73 @@ def _preds_for_loja(
 
 def render_comparativo_tab(tab_container) -> None:
     with tab_container:
+        estrutura_df = st.session_state.get("dEstrutura")
+        pessoas_df = st.session_state.get("dPessoas")
+        indicadores_df = st.session_state.get("fIndicadores")
+
         st.subheader("Comparativo Histórico vs Ideal (lojas)")
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            n_lojas = st.number_input(
-                "Número de lojas",
-                min_value=1,
-                max_value=40,
-                value=int(st.session_state.get("comparativo_n_lojas", 20)),
-                step=1,
-                help="Quantidade de lojas do topo da base de estrutura para comparar.",
+        # Estilo ajustado mais abaixo para resumo das seleções
+
+        select_all_label = "Selecionar todas"
+        if "comparativo_lojas_sel" not in st.session_state:
+            st.session_state["comparativo_lojas_sel"] = []
+
+        loja_opcoes: List[str] = []
+        if estrutura_df is not None and not estrutura_df.empty and "Loja" in estrutura_df.columns:
+            loja_opcoes = (
+                estrutura_df["Loja"]
+                .astype(str)
+                .dropna()
+                .drop_duplicates()
+                .sort_values()
+                .tolist()
             )
-            st.session_state["comparativo_n_lojas"] = int(n_lojas)
+        multiselect_options = [select_all_label] + loja_opcoes
+        def _on_change_lojas():
+            selections = st.session_state.get("comparativo_lojas_sel", [])
+            selections = [s for s in selections if s in multiselect_options]
+            if select_all_label in selections:
+                # se marcou somente "Selecionar todas", marcar todas
+                if len(selections) == 1:
+                    selections = multiselect_options[:]
+                # se desmarcou alguma depois, remove a flag de selecionar todas
+                elif len(selections) - 1 < len(loja_opcoes):
+                    selections = [s for s in selections if s != select_all_label]
+            st.session_state["comparativo_lojas_sel"] = selections
+        st.multiselect(
+            "Selecionar lojas",
+            options=multiselect_options,
+            key="comparativo_lojas_sel",
+            on_change=_on_change_lojas,
+            help="Escolha uma ou mais lojas para o comparativo.",
+            placeholder="Clique para selecionar",
+        )
+        lojas_sel = st.session_state.get("comparativo_lojas_sel", [])
+
+        # Texto resumido para o input seguindo a lógica solicitada
+        selected_lojas = [loja for loja in lojas_sel if loja in loja_opcoes]
+        has_all_selected = select_all_label in lojas_sel and len(selected_lojas) >= len(loja_opcoes)
+        display_lojas = loja_opcoes[:] if has_all_selected else selected_lojas
+        display_count = len(display_lojas)
+
+        if has_all_selected:
+            summary_text = "Todas as Lojas"
+            show_summary_only = True
+        elif display_count == 0:
+            summary_text = "Selecionar lojas"
+            show_summary_only = True
+        elif display_count == 1:
+            summary_text = display_lojas[0]
+            show_summary_only = False
+        elif display_count == 2:
+            summary_text = ", ".join(display_lojas[:2])
+            show_summary_only = False
+        else:
+            summary_text = "Seleções múltiplas"
+            show_summary_only = True
+        print(display_count)
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
             anchor_percent = st.select_slider(
                 "Âncora receita/aux (%)",
@@ -76,9 +131,6 @@ def render_comparativo_tab(tab_container) -> None:
             st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
             submitted = st.button("Realizar Comparativo", type="primary", use_container_width=True)
 
-        estrutura_df = st.session_state.get("dEstrutura")
-        pessoas_df = st.session_state.get("dPessoas")
-        indicadores_df = st.session_state.get("fIndicadores")
         if estrutura_df is None or estrutura_df.empty:
             st.warning("Base de estrutura vazia ou não carregada.")
             return
@@ -145,7 +197,16 @@ def render_comparativo_tab(tab_container) -> None:
             }
             return porte, info
 
-        lojas_top: List[str] = estrutura_norm["Loja"].astype(str).head(int(n_lojas)).tolist()
+        lojas_sel = st.session_state.get("comparativo_lojas_sel", [])
+        lojas_validas = estrutura_norm["Loja"].astype(str).dropna().drop_duplicates()
+        if select_all_label in lojas_sel or not lojas_sel:
+            lojas_top: List[str] = lojas_validas.sort_values().tolist()
+        else:
+            lojas_set = set(lojas_validas.tolist())
+            lojas_top = [loja for loja in lojas_sel if loja in lojas_set]
+        if not lojas_top:
+            st.warning("Selecione ao menos uma loja para continuar.")
+            return
 
         cache_ver = 9 + int(anchor_quantile * 100)
         model_hist = _train_cached(
@@ -179,43 +240,29 @@ def render_comparativo_tab(tab_container) -> None:
             porte_label, porte_info = _classificar_porte(feature_row)
             preds_hist = _preds_for_loja(model_hist, train_df, feature_row, "historico", horas_disp, margem, anchor_quantile)
             preds_ideal = _preds_for_loja(model_ideal, train_df, feature_row, "ideal", horas_disp, margem, anchor_quantile)
-            qtd_hist_cat = preds_hist.get("catboost")
-            qtd_hist_xg = preds_hist.get("xgboost")
-            qtd_hist_pref = qtd_hist_cat if qtd_hist_cat is not None else qtd_hist_xg
-            if qtd_hist_pref is None:
-                qtd_hist_pref = safe_float(feature_row.get("QtdAux"))
-            qtd_ideal_cat = preds_ideal.get("catboost")
-            qtd_ideal_xg = preds_ideal.get("xgboost")
-            qtd_ideal_pref = qtd_ideal_cat if qtd_ideal_cat is not None else qtd_ideal_xg
+            qtd_hist = preds_hist.get("catboost")
+            if qtd_hist is None:
+                qtd_hist = safe_float(feature_row.get("QtdAux"))
+            qtd_ideal = preds_ideal.get("catboost")
+
             receita = safe_float(feature_row.get("ReceitaTotalMes"))
-            receita_por_aux = None
-            if receita and qtd_hist_pref and qtd_hist_pref > 0:
-                receita_por_aux = receita / qtd_hist_pref
+            receita_por_aux_real = None
+            if receita and qtd_aux_real and qtd_aux_real > 0:
+                receita_por_aux_real = receita / qtd_aux_real
+
             delta_ideal = None
-            if qtd_ideal_pref is not None and qtd_hist_pref is not None:
-                delta_ideal = float(qtd_ideal_pref) - float(qtd_hist_pref)
-            delta_cat = None
-            if qtd_ideal_cat is not None and qtd_hist_cat is not None:
-                delta_cat = float(qtd_ideal_cat) - float(qtd_hist_cat)
-            delta_xg = None
-            if qtd_ideal_xg is not None and qtd_hist_xg is not None:
-                delta_xg = float(qtd_ideal_xg) - float(qtd_hist_xg)
+            if qtd_ideal is not None and qtd_hist is not None:
+                delta_ideal = float(qtd_ideal) - float(qtd_hist)
             linhas_comp.append(
                 {
                     "Loja": loja_display,
-                    "QtdAux Real": qtd_aux_real,
-                    "QtdAux Histórico": qtd_hist_pref,
-                    "QtdAux Histórico CatBoost": qtd_hist_cat,
-                    "QtdAux Histórico XGBoost": qtd_hist_xg,
-                    "QtdAux Ideal": qtd_ideal_pref,
-                    "QtdAux Ideal CatBoost": qtd_ideal_cat,
-                    "QtdAux Ideal XGBoost": qtd_ideal_xg,
-                    "Delta CatBoost (Ideal-Hist)": delta_cat,
-                    "Delta XGBoost (Ideal-Hist)": delta_xg,
-                    "QtdIdeal - QtdHistórico": delta_ideal,
+                    "Qtd Aux Real": qtd_aux_real,
+                    "Qtd Aux Historico": qtd_hist,
+                    "Qtd Aux Ideal": qtd_ideal,
+                    "Diferença": delta_ideal,
+                    "Faturamento/Qtd Aux Real": receita_por_aux_real,
                     "Porte": porte_label,
                     "Cluster Porte": porte_info.get("porte_code") if porte_info else None,
-                    "Faturamento/Aux (hist)": receita_por_aux,
                 }
             )
 
@@ -224,9 +271,20 @@ def render_comparativo_tab(tab_container) -> None:
             return
 
         tabela_comp = pd.DataFrame(linhas_comp)
+        colunas_saida = [
+            "Loja",
+            "Qtd Aux Real",
+            "Qtd Aux Historico",
+            "Qtd Aux Ideal",
+            "Diferença",
+            "Faturamento/Qtd Aux Real",
+            "Cluster Porte",
+        ]
         for porte in ("Loja grande", "Loja média", "Loja pequena"):
             subset = tabela_comp.loc[tabela_comp["Porte"] == porte].reset_index(drop=True)
             if subset.empty:
                 continue
             st.subheader(porte)
-            st.dataframe(subset.drop(columns=["Porte"]), use_container_width=True)
+            subset_exibir = subset.drop(columns=["Porte"], errors="ignore")
+            subset_exibir = subset_exibir[[c for c in colunas_saida if c in subset_exibir.columns]]
+            st.dataframe(subset_exibir, use_container_width=True)
