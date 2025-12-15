@@ -197,6 +197,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         st.session_state["lookup_row"] = _standardize_row(combined)
                         st.session_state["absenteismo_input"] = _compute_absenteismo_prefill(st.session_state.get("lookup_row", {}))
                         apply_operacional_defaults_from_lookup(st.session_state["lookup_row"])
+                        # Reinicializa indicadores de entrada ao carregar nova loja
+                        st.session_state["indicadores_reset_payload"] = {
+                            "base_ativa": safe_float(get_lookup(combined, "BaseAtiva"), 0.0),
+                            "receita_total": safe_float(get_lookup(combined, "ReceitaTotalMes"), 0.0),
+                            "inicios": safe_float(get_lookup(combined, "Inicios"), 0.0),
+                            "reinicios": safe_float(get_lookup(combined, "Reinicios"), 0.0),
+                            "recuperados": safe_float(get_lookup(combined, "Recuperados"), 0.0),
+                            "i4a_i6": safe_float(get_lookup(combined, "I4aI6"), 0.0),
+                        }
                         loja_nome = str(combined.get("Loja", lookup_code)).strip()
                         fontes = []
                         if indicator_row:
@@ -385,11 +394,38 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 reinicios_val = 0.0
                 recuperados_val = 0.0
                 i4a_i6_val = 0.0
+            reset_payload = st.session_state.pop("indicadores_reset_payload", None)
+            if reset_payload:
+                st.session_state["input_base_ativa"] = reset_payload.get("base_ativa", base_ativa_val)
+                st.session_state["input_receita_total"] = reset_payload.get("receita_total", receita_total_val)
+                st.session_state["input_inicios"] = reset_payload.get("inicios", inicios_val)
+                st.session_state["input_reinicios"] = reset_payload.get("reinicios", reinicios_val)
+                st.session_state["input_recuperados"] = reset_payload.get("recuperados", recuperados_val)
+                st.session_state["input_i4a_i6"] = reset_payload.get("i4a_i6", i4a_i6_val)
+            else:
+                # Define defaults apenas se ainda não houver estado (evita o warning de valor duplo)
+                st.session_state.setdefault("input_base_ativa", base_ativa_val)
+                st.session_state.setdefault("input_receita_total", receita_total_val)
+                st.session_state.setdefault("input_inicios", inicios_val)
+                st.session_state.setdefault("input_reinicios", reinicios_val)
+                st.session_state.setdefault("input_recuperados", recuperados_val)
+                st.session_state.setdefault("input_i4a_i6", i4a_i6_val)
 
             colIndA, colIndB, colIndC = st.columns(3)
             with colIndA:
-                base_ativa = st.number_input("Base Ativa", min_value=0.0, step=1.0, value=base_ativa_val)
-                receita_total = st.number_input("Receita Total / Mês (R$)", min_value=0.0, step=100.0, value=receita_total_val, format="%.2f")
+                base_ativa = st.number_input(
+                    "Base Ativa",
+                    min_value=0.0,
+                    step=1.0,
+                    key="input_base_ativa",
+                )
+                receita_total = st.number_input(
+                    "Receita Total / Mês (R$)",
+                    min_value=0.0,
+                    step=100.0,
+                    format="%.2f",
+                    key="input_receita_total",
+                )
             cluster_targets = [
                 "Pedidos/Hora",
                 "Pedidos/Dia",
@@ -398,12 +434,46 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 "%Retirada",
             ]
             with colIndB:
-                recuperados = st.number_input("Recuperados", min_value=0.0, step=1.0, value=recuperados_val)
-                i4_a_i6 = st.number_input("I4 a I6", min_value=0.0, step=1.0, value=i4a_i6_val)
+                recuperados = st.number_input(
+                    "Recuperados",
+                    min_value=0.0,
+                    step=1.0,
+                    key="input_recuperados",
+                )
+                i4_a_i6 = st.number_input(
+                    "I4 a I6",
+                    min_value=0.0,
+                    step=1.0,
+                    key="input_i4a_i6",
+                )
             with colIndC:
-                inicios = st.number_input("Inícios", min_value=0.0, step=1.0, value=inicios_val)
-                reinicios = st.number_input("Reinícios", min_value=0.0, step=1.0, value=reinicios_val)
+                inicios = st.number_input(
+                    "Inícios",
+                    min_value=0.0,
+                    step=1.0,
+                    key="input_inicios",
+                )
+                reinicios = st.number_input(
+                    "Reinícios",
+                    min_value=0.0,
+                    step=1.0,
+                    key="input_reinicios",
+                )
 
+            manual_override_indicadores = False
+            if has_lookup:
+                original_vals = [
+                    base_ativa_val,
+                    receita_total_val,
+                    inicios_val,
+                    reinicios_val,
+                    recuperados_val,
+                    i4a_i6_val,
+                ]
+                current_vals = [base_ativa, receita_total, inicios, reinicios, recuperados, i4_a_i6]
+                manual_override_indicadores = any(
+                    safe_float(cur, 0.0) != safe_float(orig, 0.0) for cur, orig in zip(current_vals, original_vals)
+                )
             indicadores_ctx = preparar_indicadores_operacionais(
                 base_ativa=base_ativa,
                 receita_total=receita_total,
@@ -417,6 +487,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 indicadores_df=st.session_state.get("fIndicadores"),
                 lookup_row=lookup_row if has_lookup else None,
                 has_lookup=has_lookup,
+                prefer_manual=manual_override_indicadores,
             )
             pct_base_total = indicadores_ctx["pct_base_total"]
             pct_faturamento = indicadores_ctx["pct_faturamento"]

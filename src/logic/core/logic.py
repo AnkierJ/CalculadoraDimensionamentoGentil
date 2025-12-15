@@ -507,7 +507,11 @@ def _apply_high_perf_cap(
     return capped
 
 
-def _feature_bounds_from_train(train_df: pd.DataFrame, lower_q: float = 0.05, upper_q: float = 0.95) -> Dict[str, Tuple[float, float]]:
+def _feature_bounds_from_train(
+    train_df: pd.DataFrame,
+    lower_q: float = 0.05,
+    upper_q: float = 0.95,
+) -> Dict[str, Tuple[float, float]]:
     """
     Calcula faixas de valores (quantis) das features numéricas para reuso na inferência.
     Evita extrapolar muito além do espaço visto no treino.
@@ -519,7 +523,9 @@ def _feature_bounds_from_train(train_df: pd.DataFrame, lower_q: float = 0.05, up
         series = pd.to_numeric(train_df[col], errors="coerce").dropna()
         if series.empty:
             continue
-        lo, hi = series.quantile([lower_q, upper_q])
+        # Afrouxa o clipping para BaseAtiva (usa quantis 1% e 99%)
+        lo_q, hi_q = (0.01, 0.99) if col == "BaseAtiva" else (lower_q, upper_q)
+        lo, hi = series.quantile([lo_q, hi_q])
         if pd.notna(lo) and pd.notna(hi):
             bounds[col] = (float(lo), float(hi))
     return bounds
@@ -1745,6 +1751,7 @@ def preparar_indicadores_operacionais(
     indicadores_df: Optional[pd.DataFrame] = None,
     lookup_row: Optional[Dict[str, object]] = None,
     has_lookup: bool = False,
+    prefer_manual: bool = False,
 ) -> Dict[str, object]:
     base_total_den = total_base_ref if total_base_ref and total_base_ref > 0 else None
     receita_total_den = total_receita_ref if total_receita_ref and total_receita_ref > 0 else (receita_total if receita_total > 0 else None)
@@ -1758,7 +1765,7 @@ def preparar_indicadores_operacionais(
     cluster_result: Optional[Dict[str, object]] = None
     cluster_used = False
     messages: List[Tuple[str, str]] = []
-    if has_lookup and lookup_row:
+    if has_lookup and lookup_row and not prefer_manual:
         for target in cluster_targets:
             cluster_values[target] = safe_float(get_lookup(lookup_row, target), 0.0)
     else:
