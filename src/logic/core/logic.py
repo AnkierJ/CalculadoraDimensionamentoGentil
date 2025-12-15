@@ -121,9 +121,7 @@ def calcular_carga_por_processo(tempos_processo: pd.DataFrame, frequencias: pd.D
     return base, carga_total
 def estimate_fluxo_medio_indicadores(
     base_ativa: float,
-    atividade_er: float,
     receita_total_mes: float,
-    reais_por_ativo: float,
     pedidos_dia_hist: float,
     pedidos_hora_hist: float,
     dias_operacionais: float,
@@ -149,22 +147,16 @@ def estimate_fluxo_medio_indicadores(
     if horas_semanais <= 0:
         horas_semanais = dias * 10.0
     horas_semanais = max(dias, horas_semanais)
-    atividade = _safe_value(atividade_er) / 100.0
     base_ativa_v = _safe_value(base_ativa)
     receita_mes = _safe_value(receita_total_mes)
-    ticket_medio = _safe_value(reais_por_ativo)
     pedidos_dia_hist = _safe_value(pedidos_dia_hist)
     pedidos_hora_hist = _safe_value(pedidos_hora_hist)
     componentes: Dict[str, float] = {}
     candidatos: List[Tuple[str, float, float]] = []
-    if base_ativa_v > 0 and atividade > 0:
-        pedidos_semana_base = (base_ativa_v * atividade) / WEEKS_PER_MONTH
-        componentes["base_ativa"] = pedidos_semana_base
-        candidatos.append(("base_ativa", pedidos_semana_base, 1.2))
-    if receita_mes > 0 and ticket_medio > 0:
-        pedidos_semana_rec = (receita_mes / max(ticket_medio, 1e-6)) / WEEKS_PER_MONTH
-        componentes["receita"] = pedidos_semana_rec
-        candidatos.append(("receita", pedidos_semana_rec, 1.0))
+    if receita_mes > 0 and base_ativa_v > 0:
+        pedidos_semana_rec = (receita_mes / max(base_ativa_v, 1e-6)) / WEEKS_PER_MONTH
+        componentes["receita_base"] = pedidos_semana_rec
+        candidatos.append(("receita_base", pedidos_semana_rec, 1.0))
     if pedidos_dia_hist > 0:
         pedidos_semana_hist = pedidos_dia_hist * dias
         componentes["pedidos_dia"] = pedidos_semana_hist
@@ -203,16 +195,9 @@ def estimate_pedidos_por_hora(
         if pedidos_dia > 0:
             pedidos_semana = pedidos_dia * dias
             base = pedidos_semana / horas_semanais
-    if base <= 0:
-        faturamento_hora = safe_float(indicadores.get("Faturamento/Hora"), 0.0)
-        reais_por_ativo = safe_float(indicadores.get("ReaisPorAtivo"), 0.0)
-        if faturamento_hora > 0 and reais_por_ativo > 0:
-            base = faturamento_hora / max(reais_por_ativo, 1.0)
     return max(base, 0.0)
 def estimate_process_frequencies_from_indicadores(
-    base_total: float,
     base_ativa: float,
-    atividade_er: float,
     recuperados: float,
     inicios: float,
     reinicios: float,
@@ -241,12 +226,10 @@ def estimate_process_frequencies_from_indicadores(
         pedidos_semana = 0.0
     itens_por_pedido = max(0.1, _safe_positive(itens_por_pedido))
     pct_retirada = max(0.0, min(100.0, _safe_positive(pct_retirada)))
-    base_total_v = _safe_positive(base_total)
     base_ativa_v = _safe_positive(base_ativa)
     recuperados_v = _safe_positive(recuperados)
     inicios_v = _safe_positive(inicios)
     reinicios_v = _safe_positive(reinicios)
-    atividade = _safe_positive(atividade_er) / 100.0
     resultado: Dict[str, float] = {}
     resultado_key = normalize_processo_nome("Reposição de prateleira (estoque)")
     resultado[resultado_key] = (pedidos_semana * itens_por_pedido) / 30.0
@@ -255,16 +238,16 @@ def estimate_process_frequencies_from_indicadores(
     resultado_key = normalize_processo_nome("Faturamente de pedido (retirada e delivery)")
     resultado[resultado_key] = pedidos_semana
     resultado_key = normalize_processo_nome("Devolução")
-    churn_component = ((1.0 - min(atividade, 0.99)) * base_ativa_v) / WEEKS_PER_MONTH
+    churn_component = (base_ativa_v) / WEEKS_PER_MONTH
     resultado[resultado_key] = (recuperados_v * 0.5) + churn_component
     resultado_key = normalize_processo_nome("Cadastro de revendedor")
     resultado[resultado_key] = inicios_v / WEEKS_PER_MONTH
     resultado_key = normalize_processo_nome("Atualização de cadastro de revendedor")
     resultado[resultado_key] = reinicios_v / WEEKS_PER_MONTH
     resultado_key = normalize_processo_nome("Abertura e acompanhamento de chamado")
-    resultado[resultado_key] = (recuperados_v * 0.8 + base_total_v * 0.02) / max(dias, 1.0)
+    resultado[resultado_key] = (recuperados_v * 0.8) / max(dias, 1.0)
     resultado_key = normalize_processo_nome("Eventos para os revendedores")
-    resultado[resultado_key] = (base_total_v / 800.0) + (atividade * 2.0)
+    resultado[resultado_key] = 0.0
     return {k: float(max(0.0, v)) for k, v in resultado.items()}
 # =============================================================================
 # Preparação de features e modelagem
@@ -327,7 +310,6 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
     if fIndicadores is not None and not fIndicadores.empty:
         ind_keep = [
             "Loja",
-            "ReaisPorAtivo",
             "BaseAtiva",
             "%Ativos",
             "TaxaInicios",
@@ -349,7 +331,7 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
     # numericos
     for c in set(FEATURE_COLUMNS + ["QtdAux"]):
         if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+            df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", "."), errors="coerce")
     extra_numeric = [
         "BaseTotal",
         "BaseAtiva",
@@ -358,15 +340,12 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         "Reinicios",
         "Recuperados",
         "I4aI6",
-        "A0",
-        "A1aA3",
-        "Churn",
         "AtividadeER",
         "ReceitaPorAux",
     ]
     for extra_col in extra_numeric:
         if extra_col in df.columns:
-            df[extra_col] = pd.to_numeric(df[extra_col], errors="coerce")
+            df[extra_col] = pd.to_numeric(df[extra_col].astype(str).str.replace(",", "."), errors="coerce")
     if {"ReceitaTotalMes", "QtdAux"}.issubset(df.columns):
         receita = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce")
         qtd_aux_hist = pd.to_numeric(df["QtdAux"], errors="coerce").replace(0, pd.NA)
@@ -391,9 +370,6 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
     if "%Ativos" not in df.columns:
         df["%Ativos"] = pd.NA
     _fill_ratio("%Ativos", "BaseAtiva", "BaseTotal", multiplier=100.0)
-    if "ReaisPorAtivo" not in df.columns:
-        df["ReaisPorAtivo"] = pd.NA
-    _fill_ratio("ReaisPorAtivo", "ReceitaTotalMes", "BaseAtiva")
     if "TaxaInicios" not in df.columns:
         df["TaxaInicios"] = pd.NA
     _fill_ratio("TaxaInicios", "Inicios", "BaseAtiva", fallback_col="BaseTotal", multiplier=100.0)
@@ -475,13 +451,13 @@ FEATURE_COLUMNS = [
     # demanda/fluxo
     "Pedidos/Hora", "Pedidos/Dia", "Itens/Pedido", "Faturamento/Hora", "%Retirada",
     # base comercial
-    "BaseAtiva", "ReaisPorAtivo", "%Ativos", "TaxaInicios", "TaxaReativacao",
+    "BaseAtiva", "TaxaInicios", "TaxaReativacao",
     # disponibilidade/operacao
     "HorasOperacionais",
 ]
 CONT = ["Area Total","Qtd Caixas","Pedidos/Hora","Pedidos/Dia",
-        "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva","ReaisPorAtivo",
-        "%Ativos","TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
+        "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva",
+        "TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
 MODEL_ALGO_ORDER = ["catboost"]
 MODEL_ALGO_NAMES = {
     "catboost": "CatBoostRegressor",
@@ -855,8 +831,7 @@ def make_target(
     horas_op = horas_op.where(horas_op > 0, np.nan)
     receita_est_hora = faturamento_hora * horas_op * WEEKS_PER_MONTH
     base_ativa = pd.to_numeric(train_df.get("BaseAtiva"), errors="coerce")
-    reais_por_ativo = pd.to_numeric(train_df.get("ReaisPorAtivo"), errors="coerce")
-    receita_est_base = base_ativa * reais_por_ativo / WEEKS_PER_MONTH
+    receita_est_base = base_ativa * 0.0
     receita_base = receita_mes if isinstance(receita_mes, pd.Series) else pd.Series(receita_mes, index=train_df.index)
     receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_hora)
     receita_base = receita_base.where(receita_base.notna() & (receita_base > 0), receita_est_base)
@@ -865,10 +840,10 @@ def make_target(
     # Âncora (percentil) de Receita/Aux para evitar subdimensionar ou superdimensionar
     anchor_rpa = _get_high_perf_anchor(train_df, q=anchor_q)
     if anchor_rpa is None or anchor_rpa <= 0:
-        # fallback: mediana de ReceitaPorAux ou ReaisPorAtivo como proxy
+        # fallback: mediana de ReceitaPorAux
         receita_por_aux = _compute_receita_por_aux(train_df, y_hist)
         receita_por_aux = receita_por_aux.replace([np.inf, -np.inf], np.nan)
-        anchor_rpa = float(receita_por_aux.median(skipna=True)) if receita_por_aux.notna().any() else float(reais_por_ativo.median(skipna=True))
+        anchor_rpa = float(receita_por_aux.median(skipna=True)) if receita_por_aux.notna().any() else np.nan
     if anchor_rpa is None or not np.isfinite(anchor_rpa) or anchor_rpa <= 0:
         anchor_rpa = 1.0
 
@@ -1164,12 +1139,12 @@ def get_total_reference_values(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
     if fIndicadores is None or fIndicadores.empty:
         return {}
     df = fIndicadores.copy()
-    for col in ["BaseTotal", "ReceitaTotalMes"]:
+    for col in ["BaseAtiva", "BaseTotal", "Base", "ReceitaTotalMes"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     mask = pd.Series([True] * len(df))
     has_mask = False
-    for col in ["Estado", "Praça", "Praca"]:
+    for col in ["Estado", "Praça", "PraÇõa", "Praca"]:
         if col in df.columns:
             mask &= df[col].astype(str).str.strip().str.upper() == "TOTAL"
             has_mask = True
@@ -1178,17 +1153,25 @@ def get_total_reference_values(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
         total_row = df.loc[mask]
         if not total_row.empty:
             row = total_row.iloc[0]
-            for col in ["BaseTotal", "ReceitaTotalMes"]:
+            for col in ["BaseAtiva", "ReceitaTotalMes"]:
                 if col in row:
                     val = pd.to_numeric(row[col], errors="coerce")
                     if pd.notna(val):
-                        refs[col] = float(val)
+                        key = "BaseAtivaTotal" if col == "BaseAtiva" else col
+                        refs[key] = float(val)
     if not refs:
-        for col in ["BaseTotal", "ReceitaTotalMes"]:
-            if col in df.columns:
-                total_val = pd.to_numeric(df[col], errors="coerce").sum(min_count=1)
-                if pd.notna(total_val) and total_val > 0:
-                    refs[col] = float(total_val)
+        if "BaseAtiva" in df.columns:
+            total_val = pd.to_numeric(df["BaseAtiva"], errors="coerce").sum(min_count=1)
+            if pd.notna(total_val) and total_val > 0:
+                refs["BaseAtivaTotal"] = float(total_val)
+        elif "Base" in df.columns:
+            total_val = pd.to_numeric(df["Base"], errors="coerce").sum(min_count=1)
+            if pd.notna(total_val) and total_val > 0:
+                refs["BaseAtivaTotal"] = float(total_val)
+        if "ReceitaTotalMes" in df.columns:
+            total_val = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce").sum(min_count=1)
+            if pd.notna(total_val) and total_val > 0:
+                refs["ReceitaTotalMes"] = float(total_val)
     return refs
 def estimate_cluster_indicators(
     fIndicadores: Optional[pd.DataFrame],
@@ -1211,15 +1194,10 @@ def estimate_cluster_indicators(
         "BaseTotal",
         "BaseAtiva",
         "ReceitaTotalMes",
-        "ReaisPorAtivo",
         "AtividadeER",
         "Inicios",
         "Reinicios",
         "Recuperados",
-        "Churn",
-        "A0",
-        "A1aA3",
-        "A0aA3",
         "I4aI6",
     ]
     default_targets = [
@@ -1288,11 +1266,10 @@ def _compute_porte_cluster_context(
     if train_df is None or train_df.empty:
         return None
     feature_cols = [
-        "Area Total",
-        "BaseTotal",
         "BaseAtiva",
         "ReceitaTotalMes",
         "Faturamento/Hora",
+        "Area Total",
     ]
     available = [c for c in feature_cols if c in train_df.columns]
     if len(available) < 2:
@@ -1324,9 +1301,9 @@ def _compute_porte_cluster_context(
     for rank, (cid, _) in enumerate(ordered, start=1):
         porte_map[int(cid)] = int(rank)
     thresholds = {}
-    for col in ["Area Total", "BaseTotal", "ReceitaTotalMes"]:
+    for col in ["BaseAtiva", "ReceitaTotalMes", "Faturamento/Hora", "Area Total", "QtdAux"]:
         if col in df_feat.columns:
-            thr = df_feat[col].quantile(0.75)
+            thr = df_feat[col].quantile(0.85)
             if pd.notna(thr) and thr > 0:
                 thresholds[col] = float(thr)
     return {
@@ -1341,15 +1318,29 @@ def _compute_porte_cluster_context(
         "global_median": float(target.median(skipna=True)),
     }
 def _is_loja_grande(feature_row: Dict[str, object], thresholds: Dict[str, float]) -> bool:
-    """Classifica loja como grande usando quantil 75% de porte (área/base/receita)."""
+    """Classifica loja como grande com base em Receita/Base/Faturamento/QtdAux (quantil alto) e pelo menos 2 critérios."""
+    if not thresholds:
+        return False
+    passes = 0
+    base_ok = False
+    rec_ok = False
+    qtd_ok = False
     for col, thr in thresholds.items():
         try:
             val = float(feature_row.get(col, 0.0))
         except Exception:
-            continue
+            val = 0.0
         if math.isfinite(val) and val >= thr:
-            return True
-    return False
+            passes += 1
+            if col == "BaseAtiva":
+                base_ok = True
+            if col == "ReceitaTotalMes":
+                rec_ok = True
+            if col == "QtdAux":
+                qtd_ok = True
+    if (base_ok and rec_ok) or (rec_ok and qtd_ok):
+        return True
+    return passes >= 2
 def _assign_porte_cluster(feature_row: Dict[str, object], ctx: Dict[str, object]) -> Tuple[Optional[int], Optional[float], int]:
     """Atribui cluster de porte e retorna (cluster_id, valor_medio_cluster, tamanho_cluster)."""
     model = ctx.get("model")
@@ -1742,18 +1733,12 @@ def _format_queue_diag(diag: Optional[Dict[str, float]]) -> str:
     return " | ".join(parts)
 # Movido de app.py: consolida indicadores derivados e resultados de clusterização.
 def preparar_indicadores_operacionais(
-    base_total: float,
     base_ativa: float,
     receita_total: float,
-    reais_por_ativo: float,
-    atividade_er: float,
-    churn: float,
     inicios: float,
     reinicios: float,
     recuperados: float,
     i4_a_i6: float,
-    a0: float,
-    a1aA3: float,
     total_base_ref: float,
     total_receita_ref: float,
     cluster_targets: List[str],
@@ -1761,15 +1746,14 @@ def preparar_indicadores_operacionais(
     lookup_row: Optional[Dict[str, object]] = None,
     has_lookup: bool = False,
 ) -> Dict[str, object]:
-    base_total_den = total_base_ref if total_base_ref and total_base_ref > 0 else (base_total if base_total > 0 else None)
+    base_total_den = total_base_ref if total_base_ref and total_base_ref > 0 else None
     receita_total_den = total_receita_ref if total_receita_ref and total_receita_ref > 0 else (receita_total if receita_total > 0 else None)
-    pct_base_total = calc_pct(base_total, base_total_den)
+    pct_base_total = calc_pct(base_ativa, base_total_den)
     pct_faturamento = calc_pct(receita_total, receita_total_den)
-    pct_ativos = calc_pct(base_ativa, base_total if base_total > 0 else None)
-    taxa_inicios = calc_pct(inicios, base_total if base_total > 0 else base_ativa)
+    pct_ativos = calc_pct(base_ativa, base_ativa if base_ativa > 0 else None)
+    taxa_inicios = calc_pct(inicios, base_ativa if base_ativa > 0 else None)
     taxa_reativacao = calc_pct(recuperados, i4_a_i6)
-    taxa_reinicio = calc_pct(reinicios, base_total if base_total > 0 else None)
-    a0aA3 = a0 + a1aA3
+    taxa_reinicio = calc_pct(reinicios, base_ativa if base_ativa > 0 else None)
     cluster_values = {target: 0.0 for target in cluster_targets}
     cluster_result: Optional[Dict[str, object]] = None
     cluster_used = False
@@ -1778,21 +1762,15 @@ def preparar_indicadores_operacionais(
         for target in cluster_targets:
             cluster_values[target] = safe_float(get_lookup(lookup_row, target), 0.0)
     else:
-        manual_inputs = [base_total, base_ativa, receita_total, inicios, reinicios, recuperados, i4_a_i6]
+        manual_inputs = [base_ativa, receita_total, inicios, reinicios, recuperados, i4_a_i6]
         manual_has_data = any(val is not None and not pd.isna(val) and float(val) > 0 for val in manual_inputs)
         if manual_has_data:
             cluster_inputs = {
                 "BaseAtiva": base_ativa,
                 "ReceitaTotalMes": receita_total,
-                "ReaisPorAtivo": reais_por_ativo,
-                "AtividadeER": atividade_er,
                 "Inicios": inicios,
                 "Reinicios": reinicios,
                 "Recuperados": recuperados,
-                "Churn": churn,
-                "A0": a0,
-                "A1aA3": a1aA3,
-                "A0aA3": a0aA3,
                 "I4aI6": i4_a_i6,
             }
             cluster_result = estimate_cluster_indicators(indicadores_df, cluster_inputs)
@@ -1822,7 +1800,6 @@ def preparar_indicadores_operacionais(
         "taxa_inicios": taxa_inicios,
         "taxa_reativacao": taxa_reativacao,
         "taxa_reinicio": taxa_reinicio,
-        "a0aA3": a0aA3,
         "cluster_values": cluster_values,
         "cluster_result": cluster_result,
         "cluster_used": cluster_used,
@@ -1838,7 +1815,6 @@ def montar_features_input(
     copa: int,
     espaco_evento: int,
     base_ativa: float,
-    reais_por_ativo: float,
     receita_total_mes: float,
     pct_ativos: float,
     taxa_inicios: float,
@@ -1858,7 +1834,6 @@ def montar_features_input(
         "Copa": int(copa),
         "Espaco Evento": int(espaco_evento),
         "BaseAtiva": float(base_ativa),
-        "ReaisPorAtivo": float(reais_por_ativo),
         "ReceitaTotalMes": float(receita_total_mes),
         "%Ativos": float(pct_ativos),
         "TaxaInicios": float(taxa_inicios),
@@ -1896,9 +1871,7 @@ def calcular_freq_processos_simulacao(
     pedidos_hora_hist: float,
     horas_operacionais_semanais: float,
     dias_operacionais: int,
-    base_total: float,
     base_ativa: float,
-    atividade_er: float,
     recuperados: float,
     inicios: float,
     reinicios: float,
@@ -1915,9 +1888,7 @@ def calcular_freq_processos_simulacao(
     elif pedidos_hora_hist > 0:
         pedidos_semana_ui = pedidos_hora_hist * max(horas_operacionais_semanais, 1.0)
     auto_freqs = estimate_process_frequencies_from_indicadores(
-        base_total=base_total,
         base_ativa=base_ativa,
-        atividade_er=atividade_er,
         recuperados=recuperados,
         inicios=inicios,
         reinicios=reinicios,
@@ -2203,9 +2174,7 @@ def calcular_resultado_ideal_simplificado(
     qtd_caixas: float,
     estrutura_flags: Dict[str, int],
     base_ativa: float,
-    atividade_er: float,
     receita_total: float,
-    reais_por_ativo: float,
     pct_retirada_hist: float,
     itens_pedido_hist: float,
     faturamento_hora_hist: float,
@@ -2242,9 +2211,7 @@ def calcular_resultado_ideal_simplificado(
     )
     fluxo_indicadores = estimate_fluxo_medio_indicadores(
         base_ativa=base_ativa,
-        atividade_er=atividade_er,
         receita_total_mes=receita_total,
-        reais_por_ativo=reais_por_ativo,
         pedidos_dia_hist=cluster_values.get("Pedidos/Dia", 0.0),
         pedidos_hora_hist=cluster_values.get("Pedidos/Hora", 0.0),
         dias_operacionais=dias_operacionais_ativos,

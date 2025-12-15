@@ -17,6 +17,7 @@ SYN = {
     "ReceitaTotalMes": ["ReceitaTotalMes", "Receita Total", "Receita Total Mes", "Receita_Total_Mes"],
     "ReaisPorAtivo": ["ReaisPorAtivo", "Reais por Ativo", "Boleto MǸdio", "Boleto Medio", "Boleto_Medio"],
     "AtividadeER": ["AtividadeER", "Atividade ER", "Atividade_ER"],
+    # Churn mantido apenas para compatibilidade de leitura; não mais usado no modelo
     "Churn": ["Churn"],
     "A0": ["A0"],
     "A1aA3": ["A1aA3", "A1 a A3", "A1_A3"],
@@ -238,6 +239,7 @@ def get_schema_fIndicadores() -> Dict[str, str]:
         "Loja": "string",
         "BaseTotal": "int",
         "BaseAtiva": "int",
+        # Churn mantido apenas para parse de bases antigas
         "Churn": "float",
         "ReceitaTotalMes": "float",
         "ReaisPorAtivo": "float",

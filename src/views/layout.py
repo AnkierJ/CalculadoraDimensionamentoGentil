@@ -42,6 +42,18 @@ def inject_global_styles() -> None:
             width: 100% !important;
             display: flex !important;
         }
+        /* Centraliza as abas principais da navbar */
+        .stTabs [data-baseweb="tab-list"],
+        .stTabs [role="tablist"] {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+        }
+        .stTabs [data-baseweb="tab"],
+        .stTabs [role="tab"] {
+            flex: 1 1 0;           /* mesmas larguras para as 3 abas */
+            text-align: center;
+        }
     </style>
     """,
         unsafe_allow_html=True,
@@ -100,7 +112,7 @@ def render_tutorial() -> None:
             - `fIndicadores`: métricas comerciais (%Ativos, taxas, faturamento/hora etc.).
 
         - **2️⃣ Escolha o modo de cálculo:**
-            - **Qtd Aux Atual** → mostra o dimensionamento esperado pelos padrões históricos e estruturais atuais da Gentil Negócios.
+            - **Qtd Aux Histórico** → mostra o dimensionamento esperado pelos padrões históricos e estruturais atuais da Gentil Negócios.
             - **Qtd Aux Ideal** → estima o dimensionamento ótimo com base em regressão estatística e comparação com lojas de perfil semelhante.
 
         - **3️⃣ Ajuste parâmetros complementares:**
@@ -110,8 +122,7 @@ def render_tutorial() -> None:
 
         - **4️⃣ Clique em “Calcular dimensionamento”:**
              O sistema apresentará:
-            - a **carga total estimada** (em horas);
-            - **Qtd Aux Atual ou Qtd Aux Ideal**, de acordo com o modelo escolhido e dados indicados;
+            - **Qtd Aux Histórico ou Qtd Aux Ideal**, de acordo com o modelo escolhido e dados indicados;
             - e **indicadores de precisão** do modelo (R², MAPE, SMAPE e intervalo de confiança).
         """
         )
