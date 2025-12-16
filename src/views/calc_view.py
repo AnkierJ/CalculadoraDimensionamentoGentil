@@ -277,6 +277,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             st.session_state["horas_disp_semanais"] = horas_disp
             st.session_state["horas_loja_config"] = horas_loja_config
             st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+            st.session_state["folga_operacional"] = float(folga_operacional)
         else:
             horas_disp = 44.0
             horas_loja_config = float(st.session_state.get("horas_loja_config", 60.0))
@@ -286,6 +287,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
         dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
         st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+        st.session_state["folga_operacional"] = float(folga_operacional)
 
         ocupacao_alvo = float(DEFAULT_OCUPACAO_ALVO)
         fator_monotonia = 1.0 + folga_operacional if modo_calc else 1.0 + folga_operacional
@@ -577,19 +579,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     box-shadow: none !important;
                     padding: 0 !important;
                 }
-                /* Destacar campos-chave de indicadores (container inteiro, incluindo botões +/-) */
-                div[data-testid="stNumberInput"]:has(input[aria-label="Escritorio"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="Espaco Evento"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="Dias operacionais (dados da loja)"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="Horas operacionais (h/semana)"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="Base Ativa"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="Recuperados"]),
-                div[data-testid="stNumberInput"]:has(input[aria-label="I4 a I6"]) {
-                    border: 2px solid #0c0863 !important;
-                    box-shadow: 0 0 0 3px rgba(12, 8, 99, 0.15) !important;
-                    border-radius: 8px !important;
-                    padding: 4px !important;
-                }
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -854,7 +843,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 "historico",
                 horas_disp,
                 margem,
+                algo_order=["catboost"],
                 anchor_quantile=anchor_quantile,
+                apply_cluster_blend=False,
                 compute_metrics=mostrar_metricas,
             )
             resultados_modelos = [res for res in resultados_modelos if res.get("key") == "catboost"]
@@ -866,34 +857,12 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 "ideal",
                 horas_disp,
                 margem,
+                algo_order=["catboost"],
                 anchor_quantile=anchor_quantile,
+                apply_cluster_blend=False,
                 compute_metrics=mostrar_metricas,
             )
             resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
-
-        def _ajustar_pred_hist(pred_val: float) -> tuple[float, Dict[str, float]]:
-            base_abs = float(absenteismo_prefill)
-            base_folga = float(folga_base)
-            fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
-            fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
-            ajuste_total = fator_abs * fator_folga
-            return pred_val * ajuste_total, {
-                "fator_abs": fator_abs,
-                "fator_folga": fator_folga,
-                "ajuste_total": ajuste_total,
-            }
-
-        def _ajustar_pred_ideal(pred_val: float) -> tuple[float, Dict[str, float]]:
-            base_abs = float(absenteismo_prefill)
-            base_folga = float(folga_base)
-            fator_abs = (1.0 - base_abs) / max(0.1, 1.0 - float(absenteismo))
-            fator_folga = (1.0 + float(folga_operacional)) / max(0.1, 1.0 + base_folga)
-            ajuste_total = fator_abs * fator_folga
-            return pred_val * ajuste_total, {
-                "fator_abs": fator_abs,
-                "fator_folga": fator_folga,
-                "ajuste_total": ajuste_total,
-            }
 
         cat_hist = resultados_modelos[0] if resultados_modelos else None
         cat_ideal = resultados_modelos_ideal[0] if resultados_modelos_ideal else None
@@ -939,18 +908,18 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
         if cat_hist and cat_ideal:
             st.success("Previsao (Machine Learning) concluida!")
-            pred_hist_ajust, _ = _ajustar_pred_hist(float(cat_hist.get("pred") or 0.0))
-            pred_ideal_ajust, _ = _ajustar_pred_ideal(float(cat_ideal.get("pred") or 0.0))
-            pred_hist_int = int(round(pred_hist_ajust))
-            pred_ideal_int = int(round(pred_ideal_ajust))
-            diff_val = pred_ideal_ajust - pred_hist_ajust
+            pred_hist_raw = float(cat_hist.get("pred") or 0.0)
+            pred_ideal_raw = float(cat_ideal.get("pred") or 0.0)
+            pred_hist_int = int(round(pred_hist_raw))
+            pred_ideal_int = int(round(pred_ideal_raw))
+            diff_val = pred_ideal_raw - pred_hist_raw
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Histórico</div>"
                     f"<div style=\"font-size:1.5rem;font-weight:600;\">{pred_hist_int} auxiliares</div>"
-                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_ajust:.2f} aux</div>"
+                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_raw:.2f} aux</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -966,7 +935,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
                     f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
                     f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} auxiliares</div>"
-                    f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_ajust:.2f} aux)</div>"
+                    f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_raw:.2f} aux)</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
