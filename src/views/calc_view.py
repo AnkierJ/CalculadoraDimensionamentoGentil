@@ -829,6 +829,11 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     )
     tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
     result_ideal = None
+    features_input_ml = features_input
+    if modo_ml and loja_nome_alvo_submit:
+        feature_row_ml, _ = _get_loja_row(train_df, loja_nome_alvo_submit)
+        if feature_row_ml:
+            features_input_ml = feature_row_ml
 
     if modo_ml:
         resultados_modelos: List[Dict[str, object]] = []
@@ -839,7 +844,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             resultados_modelos, model_errors_hist = gerar_resultados_modelos(
                 model_bundle_hist,
                 train_df,
-                features_input,
+                features_input_ml,
                 "historico",
                 horas_disp,
                 margem,
@@ -853,7 +858,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             resultados_modelos_ideal, model_errors_ideal = gerar_resultados_modelos(
                 model_bundle_ideal,
                 train_df,
-                features_input,
+                features_input_ml,
                 "ideal",
                 horas_disp,
                 margem,
@@ -888,7 +893,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         if mostrar_metricas and cat_hist:
             ci_hist = calcular_intervalos_modelos(
                 train_df,
-                features_input,
+                features_input_ml,
                 "historico",
                 horas_disp,
                 margem,
@@ -898,7 +903,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         if mostrar_metricas and cat_ideal:
             ci_ideal = calcular_intervalos_modelos(
                 train_df,
-                features_input,
+                features_input_ml,
                 "ideal",
                 horas_disp,
                 margem,
