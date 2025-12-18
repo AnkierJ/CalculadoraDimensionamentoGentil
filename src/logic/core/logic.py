@@ -1672,6 +1672,43 @@ def calcular_media_horas_operacionais(
     if not horas_list:
         return float(default_horas)
     return float(np.mean(horas_list))
+
+
+def estimate_elasticity_base_to_aux(
+    train_df: Optional[pd.DataFrame],
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: Optional[float] = None,
+) -> Optional[float]:
+    """
+    Estima elasticidade log-log de BaseAtiva -> headcount ideal (QtdAux).
+    Se beta=0.7, queda de 10% em BaseAtiva implica queda de ~7% em headcount ideal.
+    """
+    if train_df is None or train_df.empty:
+        return None
+    try:
+        y_ideal = make_target(
+            train_df,
+            mode="ideal",
+            horas_disp=horas_disp,
+            margem=margem,
+            anchor_quantile=anchor_quantile,
+        )
+        base = pd.to_numeric(train_df.get("BaseAtiva"), errors="coerce")
+        mask = base.notna() & (base > 0) & y_ideal.notna() & (y_ideal > 0)
+        if mask.sum() < 5:
+            return None
+        logx = np.log(base[mask].to_numpy())
+        logy = np.log(y_ideal[mask].to_numpy())
+        if len(logx) < 2:
+            return None
+        slope, _ = np.polyfit(logx, logy, deg=1)
+        if not math.isfinite(slope):
+            return None
+        slope = float(np.clip(slope, 0.3, 1.2))
+        return slope
+    except Exception:
+        return None
 # =============================================================================
 # Carga e leitura de dados
 # =============================================================================

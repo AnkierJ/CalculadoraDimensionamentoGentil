@@ -19,6 +19,7 @@ from src.logic.core.logic import (
     calcular_media_horas_operacionais,
     estimate_pedidos_dia_from_base_ativa,
     fit_base_ativa_pedidos_dia,
+    estimate_elasticity_base_to_aux,
     make_target,
     clean_training_dataframe,
     gerar_resultados_modelos,
@@ -581,12 +582,22 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 *,
                 cluster_used: bool = False,
                 cluster_result: Optional[Dict[str, object]] = None,
+                label_overrides: Optional[Dict[str, str]] = None,
+                deltas: Optional[Dict[str, float]] = None,
             ) -> None:
+                label_overrides = label_overrides or {}
+                deltas = deltas or {}
                 with st.expander(title):
                     colFlow1, colFlow2, colFlow3 = st.columns(3)
                     with colFlow1:
-                        st.metric("Pedidos/Hora", f"{values.get('Pedidos/Hora', 0.0):.2f}")
-                        st.metric("Pedidos/Dia", f"{values.get('Pedidos/Dia', 0.0):.2f}")
+                        val_hora = values.get("Pedidos/Hora", 0.0)
+                        val_dia = values.get("Pedidos/Dia", 0.0)
+                        label_hora = label_overrides.get("Pedidos/Hora", "Pedidos/Hora")
+                        label_dia = label_overrides.get("Pedidos/Dia", "Pedidos/Dia")
+                        delta_hora = deltas.get("Pedidos/Hora")
+                        delta_dia = deltas.get("Pedidos/Dia")
+                        st.metric(label_hora, f"{val_hora:.2f}", delta=(f"{delta_hora:+.2f}" if delta_hora is not None else None))
+                        st.metric(label_dia, f"{val_dia:.2f}", delta=(f"{delta_dia:+.2f}" if delta_dia is not None else None))
                     with colFlow2:
                         st.metric("Itens/Pedido", f"{values.get('Itens/Pedido', 0.0):.2f}")
                         st.metric("Faturamento/Hora", f"R$ {values.get('Faturamento/Hora', 0.0):.2f}")
@@ -598,33 +609,28 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             f"Indicadores estimados via clusterização histórica (cluster {cluster_id}/{cluster_result.get('n_clusters')} com {cluster_result.get('cluster_size')} lojas)."
                         )
 
+            op_caption = "Indicadores operacionais (dados historicos da loja selecionada)"
+            if has_lookup and manual_override_indicadores:
+                op_caption = "Indicadores operacionais (dados historicos da loja selecionada + mudanças manuais)"
+            elif not has_lookup:
+                op_caption = "Indicadores operacionais estimados por clusterizacao"
+            values_to_render = dict(cluster_values_estimados)
+            deltas_disp = {}
+            label_overrides: Dict[str, str] = {}
+            if has_lookup:
+                deltas_disp["Pedidos/Dia"] = cluster_values_estimados.get("Pedidos/Dia", 0.0) - cluster_values_observados.get("Pedidos/Dia", 0.0)
+                deltas_disp["Pedidos/Hora"] = cluster_values_estimados.get("Pedidos/Hora", 0.0) - cluster_values_observados.get("Pedidos/Hora", 0.0)
             if has_lookup and base_ativa_override:
-                _render_fluxos_expander(
-                    "Fluxos observados (historico da loja selecionada)",
-                    cluster_values_observados,
-                    cluster_used=indicadores_ctx_observados["cluster_used"],
-                    cluster_result=indicadores_ctx_observados["cluster_result"],
-                )
-                _render_fluxos_expander(
-                    "Fluxos estimados por BaseAtiva",
-                    cluster_values_estimados,
-                    cluster_used=cluster_used,
-                    cluster_result=cluster_result,
-                )
-                if fluxo_base_ativa_used and relacao_base_ativa:
-                    st.caption(
-                        "Pedidos/Dia por regressao BaseAtiva->Pedidos/Dia "
-                        f"(n={int(relacao_base_ativa.get('n', 0))}, R2={relacao_base_ativa.get('r2', 0.0):.2f}); "
-                        f"Pedidos/Hora = Pedidos/Dia / horas medias ({relacao_base_ativa.get('horas_media', 0.0):.2f} h)."
-                    )
-            else:
-                op_caption = "Indicadores operacionais (dados historicos da loja selecionada)" if has_lookup else "Indicadores operacionais estimados por clusterizacao"
-                _render_fluxos_expander(
-                    op_caption,
-                    cluster_values_estimados,
-                    cluster_used=cluster_used,
-                    cluster_result=cluster_result,
-                )
+                label_overrides["Pedidos/Dia"] = "Pedidos/Dia (estimado por BaseAtiva)"
+                label_overrides["Pedidos/Hora"] = "Pedidos/Hora (estimado por BaseAtiva)"
+            _render_fluxos_expander(
+                op_caption,
+                values_to_render,
+                cluster_used=cluster_used,
+                cluster_result=cluster_result,
+                label_overrides=label_overrides,
+                deltas=deltas_disp,
+            )
 
             cluster_values = cluster_values_estimados
             pedidos_hora = cluster_values["Pedidos/Hora"]
@@ -650,8 +656,11 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             receita_ref_estimado = receita_total
             if has_lookup and not receita_total_override:
                 receita_ref_estimado = receita_total_obs
-            faturamento_hora = _apply_faturamento_hora(cluster_values, receita_ref_estimado)
             faturamento_hora_obs = _apply_faturamento_hora(cluster_values_observados, receita_total_obs)
+            faturamento_hora = _apply_faturamento_hora(cluster_values, receita_ref_estimado)
+            if has_lookup and not receita_total_override:
+                faturamento_hora = faturamento_hora_obs
+                cluster_values_estimados["Faturamento/Hora"] = faturamento_hora_obs
 
             st.session_state["horas_operacionais_form"] = float(horas_operacionais_semanais)
 
@@ -966,6 +975,12 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         "Faturamento/Hora",
         "%Retirada",
     ]
+    beta_base_aux = estimate_elasticity_base_to_aux(
+        train_df,
+        horas_disp=horas_disp,
+        margem=margem,
+        anchor_quantile=anchor_quantile,
+    )
     if modo_ml and loja_nome_alvo_submit:
         feature_row_ml, _ = _get_loja_row(train_df, loja_nome_alvo_submit)
         if feature_row_ml:
@@ -1068,6 +1083,29 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             st.success("Previsao (Machine Learning) concluida!")
             pred_hist_raw = float(cat_hist.get("pred") or 0.0)
             pred_ideal_raw = float(cat_ideal.get("pred") or 0.0)
+            # Ajuste de elasticidade para manter monotonicidade em relação à BaseAtiva
+            if base_ativa_override and beta_base_aux and base_ativa_obs > 0:
+                ratio_base = safe_float(base_ativa, 0.0) / max(base_ativa_obs, 1e-6)
+                ratio_flux = 1.0
+                if pedidos_dia_obs > 0:
+                    ratio_flux = safe_float(pedidos_dia, 0.0) / max(pedidos_dia_obs, 1e-6)
+                beta_flux = 0.8
+                fator_base = ratio_base ** beta_base_aux if ratio_base > 0 else 1.0
+                fator_flux = ratio_flux ** beta_flux if ratio_flux > 0 else 1.0
+                fator = fator_base * fator_flux
+                base_pred = pred_ideal_raw
+                if math.isfinite(fator):
+                    if ratio_base < 1.0 or ratio_flux < 1.0:
+                        pred_ideal_raw = min(base_pred, base_pred * fator)
+                    elif ratio_base > 1.0 or ratio_flux > 1.0:
+                        pred_ideal_raw = max(base_pred, base_pred * fator)
+                    if ci_ideal:
+                        for key_ci in ["ci_low", "ci_high", "ci_low_disp", "ci_high_disp", "ci_mid_disp", "pred_mean"]:
+                            if key_ci in ci_ideal and ci_ideal[key_ci] is not None and math.isfinite(ci_ideal[key_ci]):
+                                if ratio_base < 1.0 or ratio_flux < 1.0:
+                                    ci_ideal[key_ci] = min(float(ci_ideal[key_ci]), float(ci_ideal[key_ci]) * fator)
+                                else:
+                                    ci_ideal[key_ci] = max(float(ci_ideal[key_ci]), float(ci_ideal[key_ci]) * fator)
             pred_hist_int = int(round(pred_hist_raw))
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
@@ -1108,42 +1146,167 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - hist)</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} auxiliares</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{int(round(diff_val)):+d} auxiliares</div>"
+                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{diff_val:+.2f} aux</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
             if mostrar_metricas:
                 metrics_info_ideal = cat_ideal.get("metrics") or {}
-                stats_parts: List[str] = []
-                mape_v = metrics_info_ideal.get("MAPE")
-                r2m = metrics_info_ideal.get("R2_mean")
-                precisao = metrics_info_ideal.get("Precisao_percent")
-                mae_v = metrics_info_ideal.get("MAE")
-                rmse_v = metrics_info_ideal.get("RMSE")
-                if _metric_has_value(precisao):
-                    stats_parts.append(f"Precisao {precisao:.1f}%")
-                if _metric_has_value(mape_v):
-                    stats_parts.append(f"MAPE {mape_v*100:.1f}%")
-                if _metric_has_value(mae_v):
-                    stats_parts.append(f"MAE {mae_v:.2f}")
-                if _metric_has_value(rmse_v):
-                    stats_parts.append(f"RMSE {rmse_v:.2f}")
-                if _metric_has_value(r2m):
-                    stats_parts.append(f"R2 {r2m:.2f}")
-                if stats_parts:
-                    st.markdown(
-                        f"<div style='text-align:center;'>Modelo de Machine Learning (ideal): {' | '.join(stats_parts)}</div>",
-                        unsafe_allow_html=True,
+
+                def _render_metric_card(config: Dict[str, object], raw_val: float) -> str:
+                    if not _metric_has_value(raw_val):
+                        return ""
+                    val = config.get("transform", lambda x: x)(float(raw_val))
+                    bands = config.get("bands", [])
+                    if not bands:
+                        return ""
+                    formatter = config.get("format", lambda x: f"{x}")
+                    scale_max = float(config.get("scale_max", max(b.get("max", 0.0) for b in bands)))
+                    if math.isfinite(val):
+                        scale_max = max(scale_max, val)
+                    scale_max = max(scale_max, 1e-6)
+                    gradient_parts: List[str] = []
+                    for idx_band, band in enumerate(bands):
+                        band_min = float(band.get("min", 0.0))
+                        band_max = float(band.get("max", scale_max))
+                        if idx_band == len(bands) - 1 and band_max < scale_max:
+                            band_max = scale_max
+                        start_pct = (band_min / scale_max) * 100.0
+                        end_pct = (band_max / scale_max) * 100.0
+                        gradient_parts.append(f"{band['color']} {start_pct:.1f}%, {band['color']} {end_pct:.1f}%")
+                    grad_css = ", ".join(gradient_parts) if gradient_parts else "#e8edf7 0%, #e8edf7 100%"
+                    value_pct = max(0.0, min((val / scale_max) * 100.0 if math.isfinite(val) else 0.0, 100.0))
+                    current_band = next(
+                        (
+                            band for band in bands
+                            if val >= float(band.get("min", 0.0)) and val < float(band.get("max", scale_max))
+                        ),
+                        bands[-1],
                     )
+                    legend_bits = []
+                    for idx, band in enumerate(bands):
+                        band_min = float(band.get("min", 0.0))
+                        band_max = float(band.get("max", scale_max))
+                        if idx == len(bands) - 1 and band_max < scale_max:
+                            band_max = scale_max
+                        if idx == len(bands) - 1 and band_max >= scale_max:
+                            range_txt = f">= {formatter(band_min)}"
+                        else:
+                            range_txt = f"{formatter(band_min)} - {formatter(band_max)}"
+                        legend_bits.append(f"{band['label']}: {range_txt}")
+                    faixa_otima = str(config.get("faixa_otima") or "")
+                    helper = str(config.get("helper") or "")
+                    current_color = current_band.get("color", "#0c0863")
+                    badge = (
+                        f"<span style='background:{current_color}22;color:{current_color};"
+                        f"padding:2px 8px;border-radius:12px;font-weight:700;'>"
+                        f"{current_band.get('label', '')}</span>"
+                    )
+                    return f"""
+<div style="border:1px solid #e5e7f0;border-radius:12px;padding:12px;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.03);margin-bottom:8px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-weight:600;color:#0c0c1f;">{config.get('label')}</div>
+    <div style="font-size:1.1rem;font-weight:700;color:#0c0863;">{formatter(val)}</div>
+  </div>
+  <div style="font-size:0.85rem;color:#505565;margin:4px 0 8px 0;">Faixa otima: {faixa_otima}</div>
+  <div style="position:relative;height:12px;border-radius:999px;overflow:hidden;background:#eef1f7;">
+    <div style="position:absolute;inset:0;background:linear-gradient(90deg,{grad_css});"></div>
+    <div style="position:absolute;left:{value_pct:.1f}%;top:-1px;transform:translateX(-50%);">
+      <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid #0c0863;"></div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.82rem;color:#505565;gap:8px;flex-wrap:wrap;">
+    <div style="flex:1 1 60%;line-height:1.3;">{" | ".join(legend_bits)}</div>
+    <div>{badge}</div>
+  </div>
+  <div style="font-size:0.82rem;color:#6c6c6c;margin-top:6px;line-height:1.35;">{helper}</div>
+</div>
+"""
+
+                metric_configs: List[Dict[str, object]] = [
+                    {
+                        "key": "Precisao_percent",
+                        "label": "Precisao",
+                        "format": lambda v: f"{v:.1f}%",
+                        "bands": [
+                            {"label": "Ajustar", "min": 0.0, "max": 70.0, "color": "#f0b429"},
+                            {"label": "Bom", "min": 70.0, "max": 85.0, "color": "#4da3f5"},
+                            {"label": "Otimo", "min": 85.0, "max": 100.0, "color": "#2c9a6c"},
+                        ],
+                        "faixa_otima": "Otimo >= 85% de acerto",
+                        "helper": "Percentual de previsoes com erro baixo (1 - MAPE). Quanto maior, melhor para confianca no headcount.",
+                        "scale_max": 100.0,
+                    },
+                    {
+                        "key": "MAE",
+                        "label": "MAE",
+                        "format": lambda v: f"{v:.2f}",
+                        "bands": [
+                            {"label": "Otimo", "min": 0.0, "max": 1.0, "color": "#2c9a6c"},
+                            {"label": "Bom", "min": 1.0, "max": 2.0, "color": "#4da3f5"},
+                            {"label": "Atencao", "min": 2.0, "max": 3.0, "color": "#f0b429"},
+                            {"label": "Alto", "min": 3.0, "max": 5.0, "color": "#d8516d"},
+                        ],
+                        "faixa_otima": "Otimo < 1 auxiliar de erro medio",
+                        "helper": "Erro absoluto medio em auxiliares. Representa a diferenca media entre previsto e observado. Quanto menor, melhor.",
+                        "scale_max": 5.0,
+                    },
+                    {
+                        "key": "RMSE",
+                        "label": "RMSE",
+                        "format": lambda v: f"{v:.2f}",
+                        "bands": [
+                            {"label": "Otimo", "min": 0.0, "max": 1.5, "color": "#2c9a6c"},
+                            {"label": "Bom", "min": 1.5, "max": 2.5, "color": "#4da3f5"},
+                            {"label": "Atencao", "min": 2.5, "max": 3.5, "color": "#f0b429"},
+                            {"label": "Alto", "min": 3.5, "max": 5.5, "color": "#d8516d"},
+                        ],
+                        "faixa_otima": "Otimo ate 1.5 auxiliares",
+                        "helper": "Raiz do erro quadratico medio. Penaliza mais os erros grandes e indica estabilidade do modelo. Quanto menor, melhor.",
+                        "scale_max": 5.5,
+                    },
+                    {
+                        "key": "R2_mean",
+                        "label": "R2",
+                        "format": lambda v: f"{v:.2f}",
+                        "bands": [
+                            {"label": "Fraco", "min": 0.0, "max": 0.50, "color": "#d8516d"},
+                            {"label": "Ok", "min": 0.50, "max": 0.70, "color": "#f0b429"},
+                            {"label": "Bom", "min": 0.70, "max": 0.85, "color": "#4da3f5"},
+                            {"label": "Otimo", "min": 0.85, "max": 1.0, "color": "#2c9a6c"},
+                        ],
+                        "faixa_otima": "Otimo >= 0.85 explicando variacao",
+                        "helper": "Proporcao da variacao explicada pelo modelo (1.0 é perfeito). Quanto maior, melhor a aderencia aos dados reais.",
+                        "scale_max": 1.0,
+                    },
+                ]
+
+                metric_cards: List[str] = []
+                for cfg in metric_configs:
+                    raw_val = metrics_info_ideal.get(cfg["key"])
+                    card_html = _render_metric_card(cfg, raw_val)
+                    if card_html:
+                        metric_cards.append(card_html)
+
+                if metric_cards:
+                    st.markdown("**Qualidade do modelo (ideal)**")
+                    st.caption("Faixas referenciais para previsao de headcount; a seta mostra onde o modelo atual está em cada indicador.")
+                    for idx in range(0, len(metric_cards), 2):
+                        cols = st.columns(2)
+                        for col, card_html in zip(cols, metric_cards[idx : idx + 2]):
+                            with col:
+                                st.markdown(card_html, unsafe_allow_html=True)
+                    warn_list = metrics_info_ideal.get("warnings")
+                    if warn_list:
+                        st.caption("Avisos do modelo: " + " | ".join(map(str, warn_list)))
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
 
         if model_bundle_ideal is not None:
-            with st.expander("Importancia global dos inputs (CatBoost Ideal)"):
-                if global_importance_ideal:
-                    st.dataframe(pd.DataFrame(global_importance_ideal), use_container_width=True)
-                else:
-                    st.caption("Importancia indisponivel para o modelo atual.")
+            if global_importance_ideal:
+                st.markdown("**Importancia global dos inputs (CatBoost Ideal)**")
+                st.dataframe(pd.DataFrame(global_importance_ideal), use_container_width=True)
 
         if model_errors_hist:
             itens = []
