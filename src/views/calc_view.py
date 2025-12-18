@@ -16,6 +16,9 @@ from src.logic.core.logic import (
     avaliar_carga_operacional_ideal,
     calcular_intervalos_modelos,
     calcular_resultado_ideal_simplificado,
+    calcular_media_horas_operacionais,
+    estimate_pedidos_dia_from_base_ativa,
+    fit_base_ativa_pedidos_dia,
     make_target,
     clean_training_dataframe,
     gerar_resultados_modelos,
@@ -26,6 +29,7 @@ from src.logic.core.logic import (
     preparar_indicadores_operacionais,
     prepare_training_dataframe,
 )
+from src.logic.models.model_catboost import get_catboost_feature_importance
 from src.logic.utils.helpers import (
     _norm_code,
     _standardize_row,
@@ -463,6 +467,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 )
 
             manual_override_indicadores = False
+            base_ativa_override = False
+            receita_total_override = False
             if has_lookup:
                 original_vals = [
                     base_ativa_val,
@@ -476,7 +482,32 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 manual_override_indicadores = any(
                     safe_float(cur, 0.0) != safe_float(orig, 0.0) for cur, orig in zip(current_vals, original_vals)
                 )
-            indicadores_ctx = preparar_indicadores_operacionais(
+                base_ativa_override = safe_float(base_ativa, 0.0) != safe_float(base_ativa_val, 0.0)
+                receita_total_override = safe_float(receita_total, 0.0) != safe_float(receita_total_val, 0.0)
+
+            base_ativa_obs = safe_float(base_ativa_val, base_ativa) if has_lookup else base_ativa
+            receita_total_obs = safe_float(receita_total_val, receita_total) if has_lookup else receita_total
+            inicios_obs = safe_float(inicios_val, inicios) if has_lookup else inicios
+            reinicios_obs = safe_float(reinicios_val, reinicios) if has_lookup else reinicios
+            recuperados_obs = safe_float(recuperados_val, recuperados) if has_lookup else recuperados
+            i4a_i6_obs = safe_float(i4a_i6_val, i4_a_i6) if has_lookup else i4_a_i6
+
+            indicadores_ctx_observados = preparar_indicadores_operacionais(
+                base_ativa=base_ativa_obs,
+                receita_total=receita_total_obs,
+                inicios=inicios_obs,
+                reinicios=reinicios_obs,
+                recuperados=recuperados_obs,
+                i4_a_i6=i4a_i6_obs,
+                total_base_ref=total_base_ativa_ref,
+                total_receita_ref=total_receita_ref,
+                cluster_targets=cluster_targets,
+                indicadores_df=st.session_state.get("fIndicadores"),
+                lookup_row=lookup_row if has_lookup else None,
+                has_lookup=has_lookup,
+                prefer_manual=False,
+            )
+            indicadores_ctx_estimados = preparar_indicadores_operacionais(
                 base_ativa=base_ativa,
                 receita_total=receita_total,
                 inicios=inicios,
@@ -491,16 +522,42 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 has_lookup=has_lookup,
                 prefer_manual=manual_override_indicadores,
             )
-            pct_base_total = indicadores_ctx["pct_base_total"]
-            pct_faturamento = indicadores_ctx["pct_faturamento"]
-            pct_ativos = indicadores_ctx["pct_ativos"]
-            taxa_inicios = indicadores_ctx["taxa_inicios"]
-            taxa_reativacao = indicadores_ctx["taxa_reativacao"]
-            taxa_reinicio = indicadores_ctx["taxa_reinicio"]
-            cluster_values = indicadores_ctx["cluster_values"]
-            cluster_result = indicadores_ctx["cluster_result"]
-            cluster_used = indicadores_ctx["cluster_used"]
-            for msg_type, msg_text in indicadores_ctx["messages"]:
+            pct_base_total = indicadores_ctx_estimados["pct_base_total"]
+            pct_faturamento = indicadores_ctx_estimados["pct_faturamento"]
+            pct_ativos = indicadores_ctx_estimados["pct_ativos"]
+            taxa_inicios = indicadores_ctx_estimados["taxa_inicios"]
+            taxa_reativacao = indicadores_ctx_estimados["taxa_reativacao"]
+            taxa_reinicio = indicadores_ctx_estimados["taxa_reinicio"]
+            pct_ativos_obs = indicadores_ctx_observados["pct_ativos"]
+            taxa_inicios_obs = indicadores_ctx_observados["taxa_inicios"]
+            taxa_reativacao_obs = indicadores_ctx_observados["taxa_reativacao"]
+            cluster_values_observados = indicadores_ctx_observados["cluster_values"]
+            cluster_values_estimados = indicadores_ctx_estimados["cluster_values"]
+            cluster_result = indicadores_ctx_estimados["cluster_result"]
+            cluster_used = indicadores_ctx_estimados["cluster_used"]
+            fluxo_base_ativa_used = False
+            relacao_base_ativa = {}
+            if base_ativa_override:
+                relacao_base_ativa = fit_base_ativa_pedidos_dia(st.session_state.get("fIndicadores"))
+                pedidos_dia_rel = estimate_pedidos_dia_from_base_ativa(base_ativa, relacao_base_ativa)
+                if pedidos_dia_rel is not None:
+                    base_ref = safe_float(base_ativa_obs, 0.0)
+                    pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
+                    if base_ref > 0 and pedidos_dia_ref > 0 and safe_float(base_ativa, 0.0) != base_ref:
+                        ratio = safe_float(base_ativa, 0.0) / base_ref
+                        if ratio < 1.0 and pedidos_dia_rel >= pedidos_dia_ref:
+                            pedidos_dia_rel = pedidos_dia_ref * ratio
+                        elif ratio > 1.0 and pedidos_dia_rel <= pedidos_dia_ref:
+                            pedidos_dia_rel = pedidos_dia_ref * ratio
+                    horas_media = calcular_media_horas_operacionais(df_estrutura)
+                    cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
+                    cluster_values_estimados["Pedidos/Hora"] = pedidos_dia_rel / max(horas_media, 1.0)
+                    relacao_base_ativa = dict(relacao_base_ativa)
+                    relacao_base_ativa["horas_media"] = float(horas_media)
+                    fluxo_base_ativa_used = True
+                else:
+                    st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao BaseAtiva->Pedidos/Dia.")
+            for msg_type, msg_text in indicadores_ctx_estimados["messages"]:
                 if msg_type == "warning":
                     st.warning(msg_text)
                 else:
@@ -518,40 +575,87 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     st.metric("% do Faturamento Total", f"{pct_faturamento:.2f}%")
                     st.metric("Taxa Reinício", f"{taxa_reinicio:.2f}%")
 
-            op_caption = "Indicadores operacionais (dados históricos da loja selecionada)" if has_lookup else "Indicadores operacionais estimados por clusterização"
-            with st.expander(op_caption):
-                colFlow1, colFlow2, colFlow3 = st.columns(3)
-                with colFlow1:
-                    st.metric("Pedidos/Hora", f"{cluster_values['Pedidos/Hora']:.2f}")
-                    st.metric("Pedidos/Dia", f"{cluster_values['Pedidos/Dia']:.2f}")
-                with colFlow2:
-                    st.metric("Itens/Pedido", f"{cluster_values['Itens/Pedido']:.2f}")
-                    st.metric("Faturamento/Hora", f"R$ {cluster_values['Faturamento/Hora']:.2f}")
-                with colFlow3:
-                    st.metric("% Retirada", f"{cluster_values['%Retirada']:.2f}%")
-                if cluster_used and cluster_result:
-                    cluster_id = int(cluster_result.get("cluster_id", 0)) + 1
-                    st.info(
-                        f"Indicadores estimados via clusterização histórica (cluster {cluster_id}/{cluster_result.get('n_clusters')} com {cluster_result.get('cluster_size')} lojas)."
-                    )
+            def _render_fluxos_expander(
+                title: str,
+                values: Dict[str, float],
+                *,
+                cluster_used: bool = False,
+                cluster_result: Optional[Dict[str, object]] = None,
+            ) -> None:
+                with st.expander(title):
+                    colFlow1, colFlow2, colFlow3 = st.columns(3)
+                    with colFlow1:
+                        st.metric("Pedidos/Hora", f"{values.get('Pedidos/Hora', 0.0):.2f}")
+                        st.metric("Pedidos/Dia", f"{values.get('Pedidos/Dia', 0.0):.2f}")
+                    with colFlow2:
+                        st.metric("Itens/Pedido", f"{values.get('Itens/Pedido', 0.0):.2f}")
+                        st.metric("Faturamento/Hora", f"R$ {values.get('Faturamento/Hora', 0.0):.2f}")
+                    with colFlow3:
+                        st.metric("% Retirada", f"{values.get('%Retirada', 0.0):.2f}%")
+                    if cluster_used and cluster_result:
+                        cluster_id = int(cluster_result.get("cluster_id", 0)) + 1
+                        st.info(
+                            f"Indicadores estimados via clusterização histórica (cluster {cluster_id}/{cluster_result.get('n_clusters')} com {cluster_result.get('cluster_size')} lojas)."
+                        )
 
+            if has_lookup and base_ativa_override:
+                _render_fluxos_expander(
+                    "Fluxos observados (historico da loja selecionada)",
+                    cluster_values_observados,
+                    cluster_used=indicadores_ctx_observados["cluster_used"],
+                    cluster_result=indicadores_ctx_observados["cluster_result"],
+                )
+                _render_fluxos_expander(
+                    "Fluxos estimados por BaseAtiva",
+                    cluster_values_estimados,
+                    cluster_used=cluster_used,
+                    cluster_result=cluster_result,
+                )
+                if fluxo_base_ativa_used and relacao_base_ativa:
+                    st.caption(
+                        "Pedidos/Dia por regressao BaseAtiva->Pedidos/Dia "
+                        f"(n={int(relacao_base_ativa.get('n', 0))}, R2={relacao_base_ativa.get('r2', 0.0):.2f}); "
+                        f"Pedidos/Hora = Pedidos/Dia / horas medias ({relacao_base_ativa.get('horas_media', 0.0):.2f} h)."
+                    )
+            else:
+                op_caption = "Indicadores operacionais (dados historicos da loja selecionada)" if has_lookup else "Indicadores operacionais estimados por clusterizacao"
+                _render_fluxos_expander(
+                    op_caption,
+                    cluster_values_estimados,
+                    cluster_used=cluster_used,
+                    cluster_result=cluster_result,
+                )
+
+            cluster_values = cluster_values_estimados
             pedidos_hora = cluster_values["Pedidos/Hora"]
             pedidos_dia = cluster_values["Pedidos/Dia"]
             itens_pedido = cluster_values["Itens/Pedido"]
-            faturamento_hora = cluster_values["Faturamento/Hora"]
             pct_retirada = cluster_values["%Retirada"]
+            pedidos_hora_obs = cluster_values_observados["Pedidos/Hora"]
+            pedidos_dia_obs = cluster_values_observados["Pedidos/Dia"]
+            itens_pedido_obs = cluster_values_observados["Itens/Pedido"]
+            pct_retirada_obs = cluster_values_observados["%Retirada"]
 
             # Derivar faturamento/hora a partir de Receita Total / mês, dias operacionais e horas operacionais
             denom_fat_hora = 4.34 * max(1.0, float(dias_operacionais_em_uso)) * max(0.1, float(horas_operacionais_diarias))
-            if receita_total > 0 and denom_fat_hora > 0:
-                faturamento_hora_calc = float(receita_total) / denom_fat_hora
-                if faturamento_hora_calc > 0:
-                    faturamento_hora = faturamento_hora_calc
-                    cluster_values["Faturamento/Hora"] = faturamento_hora_calc
+            def _apply_faturamento_hora(values: Dict[str, float], receita_ref: float) -> float:
+                faturamento_val = values.get("Faturamento/Hora", 0.0)
+                if receita_ref > 0 and denom_fat_hora > 0:
+                    faturamento_hora_calc = float(receita_ref) / denom_fat_hora
+                    if faturamento_hora_calc > 0:
+                        faturamento_val = faturamento_hora_calc
+                        values["Faturamento/Hora"] = faturamento_hora_calc
+                return faturamento_val
+
+            receita_ref_estimado = receita_total
+            if has_lookup and not receita_total_override:
+                receita_ref_estimado = receita_total_obs
+            faturamento_hora = _apply_faturamento_hora(cluster_values, receita_ref_estimado)
+            faturamento_hora_obs = _apply_faturamento_hora(cluster_values_observados, receita_total_obs)
 
             st.session_state["horas_operacionais_form"] = float(horas_operacionais_semanais)
 
-            features_input = montar_features_input(
+            features_input_ideal = montar_features_input(
                 area_total,
                 qtd_caixas,
                 float(horas_operacionais_diarias),
@@ -569,6 +673,25 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 itens_pedido,
                 faturamento_hora,
                 pct_retirada,
+            )
+            features_input_hist = montar_features_input(
+                area_total,
+                qtd_caixas,
+                float(horas_operacionais_diarias),
+                float(dias_operacionais_em_uso),
+                int(escritorio),
+                int(copa),
+                int(espaco_evento),
+                base_ativa_obs,
+                receita_total_obs,
+                pct_ativos_obs,
+                taxa_inicios_obs,
+                taxa_reativacao_obs,
+                pedidos_hora_obs,
+                pedidos_dia_obs,
+                itens_pedido_obs,
+                faturamento_hora_obs,
+                pct_retirada_obs,
             )
         with st.form("form_inputs"):
             st.markdown(
@@ -829,22 +952,44 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     )
     tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
     result_ideal = None
-    features_input_ml = features_input
+    features_input_hist_ml = features_input_hist
+    features_input_ideal_ml = features_input_ideal
+    indicator_feature_keys = [
+        "BaseAtiva",
+        "ReceitaTotalMes",
+        "%Ativos",
+        "TaxaInicios",
+        "TaxaReativacao",
+        "Pedidos/Hora",
+        "Pedidos/Dia",
+        "Itens/Pedido",
+        "Faturamento/Hora",
+        "%Retirada",
+    ]
     if modo_ml and loja_nome_alvo_submit:
         feature_row_ml, _ = _get_loja_row(train_df, loja_nome_alvo_submit)
         if feature_row_ml:
-            features_input_ml = feature_row_ml
+            features_input_hist_ml = feature_row_ml
+            if not (manual_override_indicadores or base_ativa_override):
+                features_input_ideal_ml = feature_row_ml
+            else:
+                features_input_ideal_ml = dict(feature_row_ml)
+                for key in indicator_feature_keys:
+                    if key in features_input_ideal:
+                        features_input_ideal_ml[key] = features_input_ideal[key]
 
     if modo_ml:
         resultados_modelos: List[Dict[str, object]] = []
         resultados_modelos_ideal: List[Dict[str, object]] = []
         model_errors_hist: Dict[str, object] = {}
         model_errors_ideal: Dict[str, object] = {}
+        global_importance_ideal: List[Dict[str, object]] = []
+        skip_cap_cols_ideal = ["BaseAtiva", "Pedidos/Dia", "Pedidos/Hora"] if base_ativa_override else None
         if model_bundle_hist is not None:
             resultados_modelos, model_errors_hist = gerar_resultados_modelos(
                 model_bundle_hist,
                 train_df,
-                features_input_ml,
+                features_input_hist_ml,
                 "historico",
                 horas_disp,
                 margem,
@@ -858,7 +1003,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             resultados_modelos_ideal, model_errors_ideal = gerar_resultados_modelos(
                 model_bundle_ideal,
                 train_df,
-                features_input_ml,
+                features_input_ideal_ml,
                 "ideal",
                 horas_disp,
                 margem,
@@ -866,8 +1011,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
                 compute_metrics=mostrar_metricas,
+                skip_cap_cols=skip_cap_cols_ideal,
             )
             resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
+            model_cb_ideal = (model_bundle_ideal or {}).get("models", {}).get("catboost")
+            import_rows = get_catboost_feature_importance(model_cb_ideal)
+            if import_rows:
+                global_importance_ideal = [
+                    {"Feature": name, "Importancia": value} for name, value in import_rows
+                ]
 
         cat_hist = resultados_modelos[0] if resultados_modelos else None
         cat_ideal = resultados_modelos_ideal[0] if resultados_modelos_ideal else None
@@ -893,7 +1045,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         if mostrar_metricas and cat_hist:
             ci_hist = calcular_intervalos_modelos(
                 train_df,
-                features_input_ml,
+                features_input_hist_ml,
                 "historico",
                 horas_disp,
                 margem,
@@ -903,12 +1055,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         if mostrar_metricas and cat_ideal:
             ci_ideal = calcular_intervalos_modelos(
                 train_df,
-                features_input_ml,
+                features_input_ideal_ml,
                 "ideal",
                 horas_disp,
                 margem,
                 ["catboost"],
                 anchor_quantile=anchor_quantile,
+                skip_cap_cols=skip_cap_cols_ideal,
             ).get("catboost", {})
 
         if cat_hist and cat_ideal:
@@ -984,6 +1137,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     )
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
+
+        if model_bundle_ideal is not None:
+            with st.expander("Importancia global dos inputs (CatBoost Ideal)"):
+                if global_importance_ideal:
+                    st.dataframe(pd.DataFrame(global_importance_ideal), use_container_width=True)
+                else:
+                    st.caption("Importancia indisponivel para o modelo atual.")
 
         if model_errors_hist:
             itens = []

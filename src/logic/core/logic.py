@@ -531,13 +531,18 @@ def _feature_bounds_from_train(
     return bounds
 
 
-def _cap_feature_row(feature_row: Dict[str, object], bounds: Dict[str, Tuple[float, float]]) -> Dict[str, object]:
+def _cap_feature_row(
+    feature_row: Dict[str, object],
+    bounds: Dict[str, Tuple[float, float]],
+    skip_cols: Optional[List[str]] = None,
+) -> Dict[str, object]:
     """Aplica clipping nos valores de entrada conforme os quantis do treino."""
     if not bounds or not feature_row:
         return feature_row
     capped = dict(feature_row)
+    skip_set = set(skip_cols or [])
     for col, (lo, hi) in bounds.items():
-        if col not in capped:
+        if col in skip_set or col not in capped:
             continue
         try:
             val = float(capped[col])
@@ -564,7 +569,13 @@ def _prepare_model_data(
     used_features = [c for c in FEATURE_COLUMNS if c in train_df.columns]
     if not used_features:
         return None
-    used_features = drop_high_correlation(train_df, used_features, thr=0.85)
+    preserve_cols = ["BaseAtiva", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora"]
+    used_features = drop_high_correlation(
+        train_df,
+        used_features,
+        thr=0.85,
+        preserve_cols=preserve_cols,
+    )
     X = train_df[used_features].copy()
     y = make_target(
         train_df,
@@ -596,7 +607,12 @@ def _prepare_model_data(
             fator = (receita_por_aux / max(ref, 1e-6)).clip(lower=0.4, upper=2.5).fillna(1.0)
             sample_weights = fator.reindex(base_weights.index, fill_value=1.0)
     return X, y, used_features, sample_weights
-def drop_high_correlation(df: pd.DataFrame, cols: List[str], thr: float = 0.85) -> List[str]:
+def drop_high_correlation(
+    df: pd.DataFrame,
+    cols: List[str],
+    thr: float = 0.85,
+    preserve_cols: Optional[List[str]] = None,
+) -> List[str]:
     """Remove features altamente correlacionadas para evitar multicolinearidade."""
     X = df[[c for c in cols if c in df.columns]].copy()
     for c in X.columns:
@@ -604,6 +620,7 @@ def drop_high_correlation(df: pd.DataFrame, cols: List[str], thr: float = 0.85) 
     X = X.dropna(how="all", axis=1)
     if X.shape[1] <= 1:
         return list(X.columns)
+    preserve = set(preserve_cols or [])
     # ordem por variância (labels, não posicional)
     var_order = X.var(numeric_only=True).sort_values(ascending=False)
     order = var_order.index.tolist()
@@ -620,11 +637,15 @@ def drop_high_correlation(df: pd.DataFrame, cols: List[str], thr: float = 0.85) 
                 null1 = X[c1].isna().mean()
                 null2 = X[c2].isna().mean()
                 if null1 > null2:
-                    to_drop.add(c1)
+                    if c1 not in preserve:
+                        to_drop.add(c1)
                 elif null2 > null1:
-                    to_drop.add(c2)
+                    if c2 not in preserve:
+                        to_drop.add(c2)
                 else:
-                    to_drop.add(c1 if var_order[c1] < var_order[c2] else c2)
+                    drop_candidate = c1 if var_order[c1] < var_order[c2] else c2
+                    if drop_candidate not in preserve:
+                        to_drop.add(drop_candidate)
     kept = [c for c in order if c not in to_drop]
     return kept
 def _reduce_features_by_mi(
@@ -1548,6 +1569,109 @@ def ideal_simplificado_por_fluxo(
         "fator_monotonia": float(max(1.0, float(fator_monotonia))),
     })
     return resultado
+
+
+def _filter_total_rows_indicadores(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    mask_total = pd.Series([True] * len(df), index=df.index)
+    has_total = False
+    for col in ["Estado", "Praça", "Praca"]:
+        if col in df.columns:
+            mask_total &= df[col].astype(str).str.strip().str.upper() == "TOTAL"
+            has_total = True
+    if has_total:
+        df = df.loc[~mask_total]
+    return df
+
+
+def fit_base_ativa_pedidos_dia(fIndicadores: Optional[pd.DataFrame]) -> Dict[str, float]:
+    """
+    Ajusta regressao polinomial (grau 2) BaseAtiva -> Pedidos/Dia usando fIndicadores.
+    Retorna coeficientes e qualidade do ajuste.
+    """
+    if fIndicadores is None or fIndicadores.empty:
+        return {}
+    df = fIndicadores.copy()
+    df = _filter_total_rows_indicadores(df)
+    if "BaseAtiva" not in df.columns or "Pedidos/Dia" not in df.columns:
+        return {}
+    df["BaseAtiva"] = pd.to_numeric(df["BaseAtiva"], errors="coerce")
+    df["Pedidos/Dia"] = pd.to_numeric(df["Pedidos/Dia"], errors="coerce")
+    df = df.dropna(subset=["BaseAtiva", "Pedidos/Dia"])
+    df = df[(df["BaseAtiva"] > 0) & (df["Pedidos/Dia"] > 0)]
+    if len(df) < 2:
+        return {}
+    x = df["BaseAtiva"].astype(float).to_numpy()
+    y = df["Pedidos/Dia"].astype(float).to_numpy()
+    coef_a, coef_b, coef_c = np.polyfit(x, y, deg=2)
+    y_pred = (coef_a * x * x) + (coef_b * x) + coef_c
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - float(np.mean(y))) ** 2))
+    r2 = 0.0 if ss_tot <= 0 else max(0.0, 1.0 - (ss_res / ss_tot))
+    return {
+        "degree": 2,
+        "coef_a": float(coef_a),
+        "coef_b": float(coef_b),
+        "coef_c": float(coef_c),
+        "r2": float(r2),
+        "n": int(len(df)),
+    }
+
+
+def estimate_pedidos_dia_from_base_ativa(
+    base_ativa: float,
+    model_params: Optional[Dict[str, float]],
+) -> Optional[float]:
+    if not model_params:
+        return None
+    coef_a = model_params.get("coef_a")
+    coef_b = model_params.get("coef_b")
+    coef_c = model_params.get("coef_c")
+    if coef_a is None or coef_b is None or coef_c is None:
+        return None
+    base_val = safe_float(base_ativa, 0.0)
+    pred = (float(coef_a) * base_val * base_val) + (float(coef_b) * base_val) + float(coef_c)
+    if not math.isfinite(pred):
+        return None
+    return float(max(0.0, pred))
+
+
+def calcular_media_horas_operacionais(
+    estrutura_df: Optional[pd.DataFrame],
+    default_horas: float = 10.0,
+) -> float:
+    if estrutura_df is None or estrutura_df.empty:
+        return float(default_horas)
+    horas_list: List[float] = []
+    for _, row in estrutura_df.iterrows():
+        horas = None
+        if pd.notna(row.get("HoraAbertura")) and pd.notna(row.get("HoraFechamento")):
+            try:
+                a = pd.to_datetime(row["HoraAbertura"], errors="coerce")
+                f = pd.to_datetime(row["HoraFechamento"], errors="coerce")
+                if pd.notna(a) and pd.notna(f):
+                    h = (f - a).total_seconds() / 3600.0
+                    if 0 < h <= 24:
+                        horas = float(h)
+            except Exception:
+                horas = None
+        if horas is None and pd.notna(row.get("HorasOperacionais")):
+            horas_val = safe_float(row.get("HorasOperacionais"), 0.0)
+            if horas_val > 0:
+                horas = float(horas_val)
+        if horas is None:
+            continue
+        dias = safe_float(row.get("DiasOperacionais"), 0.0)
+        if horas > 24:
+            if dias <= 0:
+                dias = 6.0
+            horas = horas / max(1.0, min(7.0, dias))
+        if 0 < horas <= 24:
+            horas_list.append(float(horas))
+    if not horas_list:
+        return float(default_horas)
+    return float(np.mean(horas_list))
 # =============================================================================
 # Carga e leitura de dados
 # =============================================================================
@@ -1917,12 +2041,13 @@ def gerar_resultados_modelos(
     anchor_quantile: Optional[float] = None,
     apply_cluster_blend: bool = True,
     compute_metrics: bool = True,
+    skip_cap_cols: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, object]], Dict[str, str]]:
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
     algo_sequence = algo_order or MODEL_ALGO_ORDER
     feature_bounds = _feature_bounds_from_train(train_df)
-    capped_features = _cap_feature_row(features_input, feature_bounds)
+    capped_features = _cap_feature_row(features_input, feature_bounds, skip_cols=skip_cap_cols)
     cluster_ctx = None
     if apply_cluster_blend and ref_mode == "ideal":
         cluster_ctx = _compute_porte_cluster_context(
@@ -2015,10 +2140,11 @@ def calcular_intervalos_modelos(
     quantis: Tuple[int, int] = (5, 95),
     anchor_quantile: Optional[float] = None,
     apply_cluster_blend: bool = True,
+    skip_cap_cols: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
     feature_bounds = _feature_bounds_from_train(train_df)
-    capped_features = _cap_feature_row(features_input, feature_bounds)
+    capped_features = _cap_feature_row(features_input, feature_bounds, skip_cols=skip_cap_cols)
     cluster_ctx = None
     if apply_cluster_blend and ref_mode == "ideal":
         cluster_ctx = _compute_porte_cluster_context(

@@ -154,6 +154,33 @@ def predict_catboost(model, feature_row: Dict[str, object]) -> Dict[str, float]:
     return {"pred": float(pred)}
 
 
+def get_catboost_feature_importance(model) -> List[tuple[str, float]]:
+    if model is None:
+        return []
+    model_ref = model
+    if isinstance(model, CatBoostQuantileModel):
+        model_ref = model.model_mid
+    try:
+        names = (
+            getattr(model, "model_feature_names_", None)
+            or getattr(model_ref, "feature_names_", None)
+            or list(getattr(model_ref, "feature_names_in_", []))
+        )
+        importances = model_ref.get_feature_importance()
+    except Exception:
+        return []
+    if not names or importances is None:
+        return []
+    rows: List[tuple[str, float]] = []
+    for name, val in zip(names, importances):
+        try:
+            rows.append((str(name), float(val)))
+        except Exception:
+            continue
+    rows.sort(key=lambda item: item[1], reverse=True)
+    return rows
+
+
 def train_catboost_model(
     X: pd.DataFrame,
     y: pd.Series,
