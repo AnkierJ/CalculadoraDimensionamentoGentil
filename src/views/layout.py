@@ -85,11 +85,12 @@ def render_header() -> None:
         align-items:center;
         text-align:center;
         width:100%;
+        margin-bottom: 20px;
     ">
         <img src="data:image/svg+xml;base64,{logo_kalk}" width="180" style="margin-right: 20px">
         <div style="display: flex; flex-direction: column">
             <h2>Calculadora de Dimensionamento de Time</h2>
-            <p>O modelo considera uma base consolidada de dados da operação (características estruturais, fluxo de pedidos, desempenho comercial e padrões de processos) para calcular tanto o <b>dimensionamento esperados pelo padrão atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
+            <p style="padding-inline: 100px">O modelo considera uma base consolidada de dados da operação (características estruturais, fluxo de pedidos, desempenho comercial e padrões de processos) para calcular tanto o <b>dimensionamento esperados pelo padrão atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
         </div>
     </div>
     """,
