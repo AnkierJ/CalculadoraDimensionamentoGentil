@@ -1587,8 +1587,8 @@ def _filter_total_rows_indicadores(df: pd.DataFrame) -> pd.DataFrame:
 
 def fit_base_ativa_pedidos_dia(fIndicadores: Optional[pd.DataFrame]) -> Dict[str, float]:
     """
-    Ajusta regressao polinomial (grau 2) BaseAtiva -> Pedidos/Dia usando fIndicadores.
-    Retorna coeficientes e qualidade do ajuste.
+    Ajusta regressao log-log BaseAtiva -> Pedidos/Dia usando fIndicadores.
+    Retorna elasticidade (slope), intercepto e qualidade do ajuste.
     """
     if fIndicadores is None or fIndicadores.empty:
         return {}
@@ -1600,20 +1600,20 @@ def fit_base_ativa_pedidos_dia(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
     df["Pedidos/Dia"] = pd.to_numeric(df["Pedidos/Dia"], errors="coerce")
     df = df.dropna(subset=["BaseAtiva", "Pedidos/Dia"])
     df = df[(df["BaseAtiva"] > 0) & (df["Pedidos/Dia"] > 0)]
-    if len(df) < 2:
+    if len(df) < 3:
         return {}
     x = df["BaseAtiva"].astype(float).to_numpy()
     y = df["Pedidos/Dia"].astype(float).to_numpy()
-    coef_a, coef_b, coef_c = np.polyfit(x, y, deg=2)
-    y_pred = (coef_a * x * x) + (coef_b * x) + coef_c
-    ss_res = float(np.sum((y - y_pred) ** 2))
-    ss_tot = float(np.sum((y - float(np.mean(y))) ** 2))
+    logx = np.log(x)
+    logy = np.log(y)
+    slope, intercept = np.polyfit(logx, logy, deg=1)
+    y_pred = (slope * logx) + intercept
+    ss_res = float(np.sum((logy - y_pred) ** 2))
+    ss_tot = float(np.sum((logy - float(np.mean(logy))) ** 2))
     r2 = 0.0 if ss_tot <= 0 else max(0.0, 1.0 - (ss_res / ss_tot))
     return {
-        "degree": 2,
-        "coef_a": float(coef_a),
-        "coef_b": float(coef_b),
-        "coef_c": float(coef_c),
+        "elasticity": float(slope),
+        "intercept": float(intercept),
         "r2": float(r2),
         "n": int(len(df)),
     }
@@ -1659,13 +1659,14 @@ def estimate_pedidos_dia_from_base_ativa(
 ) -> Optional[float]:
     if not model_params:
         return None
-    coef_a = model_params.get("coef_a")
-    coef_b = model_params.get("coef_b")
-    coef_c = model_params.get("coef_c")
-    if coef_a is None or coef_b is None or coef_c is None:
+    elasticity = model_params.get("elasticity")
+    intercept = model_params.get("intercept")
+    if elasticity is None or intercept is None:
         return None
     base_val = safe_float(base_ativa, 0.0)
-    pred = (float(coef_a) * base_val * base_val) + (float(coef_b) * base_val) + float(coef_c)
+    if base_val <= 0:
+        return None
+    pred = math.exp(float(intercept)) * (float(base_val) ** float(elasticity))
     if not math.isfinite(pred):
         return None
     return float(max(0.0, pred))

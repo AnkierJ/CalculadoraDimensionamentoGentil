@@ -567,11 +567,12 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 if pedidos_dia_rel is not None:
                     base_ref = safe_float(base_ativa_obs, 0.0)
                     pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
+                    elasticity = safe_float(relacao_base_ativa.get("elasticity"), 0.0)
                     if base_ref > 0 and pedidos_dia_ref > 0 and safe_float(base_ativa, 0.0) != base_ref:
                         ratio = safe_float(base_ativa, 0.0) / base_ref
-                        if ratio < 1.0 and pedidos_dia_rel >= pedidos_dia_ref:
-                            pedidos_dia_rel = pedidos_dia_ref * ratio
-                        elif ratio > 1.0 and pedidos_dia_rel <= pedidos_dia_ref:
+                        if elasticity > 0:
+                            pedidos_dia_rel = pedidos_dia_ref * (ratio ** elasticity)
+                        else:
                             pedidos_dia_rel = pedidos_dia_ref * ratio
                     cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
                     relacao_base_ativa = dict(relacao_base_ativa)
@@ -579,6 +580,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     fluxo_base_ativa_used = True
                 else:
                     st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao BaseAtiva->Pedidos/Dia.")
+            if has_lookup:
+                cluster_values_estimados["Itens/Pedido"] = cluster_values_observados.get("Itens/Pedido", 0.0)
+                cluster_values_estimados["%Retirada"] = cluster_values_observados.get("%Retirada", 0.0)
             for msg_type, msg_text in indicadores_ctx_estimados["messages"]:
                 if msg_type == "warning":
                     st.warning(msg_text)
@@ -1167,6 +1171,44 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                                     ci_ideal[key_ci] = min(float(ci_ideal[key_ci]), float(ci_ideal[key_ci]) * fator)
                                 else:
                                     ci_ideal[key_ci] = max(float(ci_ideal[key_ci]), float(ci_ideal[key_ci]) * fator)
+                # Clampa contra o baseline da loja para evitar saltos contra-intuitivos
+                pred_base_ref = None
+                try:
+                    features_base = dict(features_input_ideal_ml)
+                    features_base["BaseAtiva"] = float(base_ativa_obs)
+                    features_base["Pedidos/Dia"] = float(pedidos_dia_obs)
+                    features_base["Pedidos/Hora"] = float(pedidos_hora_obs)
+                    features_base["ReceitaTotalMes"] = float(receita_total_obs)
+                    base_results, _ = gerar_resultados_modelos(
+                        model_bundle_ideal,
+                        train_df,
+                        features_base,
+                        "ideal",
+                        horas_disp,
+                        margem,
+                        algo_order=["catboost"],
+                        anchor_quantile=anchor_quantile,
+                        apply_cluster_blend=False,
+                        compute_metrics=False,
+                        skip_cap_cols=skip_cap_cols_ideal,
+                    )
+                    if base_results:
+                        pred_base_ref = float(base_results[0].get("pred") or 0.0)
+                except Exception:
+                    pred_base_ref = None
+                if pred_base_ref is not None and math.isfinite(pred_base_ref):
+                    if ratio_base < 1.0:
+                        pred_ideal_raw = min(pred_ideal_raw, pred_base_ref)
+                        if ci_ideal:
+                            for key_ci in ["ci_low", "ci_high", "ci_low_disp", "ci_high_disp", "ci_mid_disp", "pred_mean"]:
+                                if key_ci in ci_ideal and ci_ideal[key_ci] is not None and math.isfinite(ci_ideal[key_ci]):
+                                    ci_ideal[key_ci] = min(float(ci_ideal[key_ci]), pred_base_ref)
+                    elif ratio_base > 1.0:
+                        pred_ideal_raw = max(pred_ideal_raw, pred_base_ref)
+                        if ci_ideal:
+                            for key_ci in ["ci_low", "ci_high", "ci_low_disp", "ci_high_disp", "ci_mid_disp", "pred_mean"]:
+                                if key_ci in ci_ideal and ci_ideal[key_ci] is not None and math.isfinite(ci_ideal[key_ci]):
+                                    ci_ideal[key_ci] = max(float(ci_ideal[key_ci]), pred_base_ref)
             pred_hist_int = int(round(pred_hist_raw))
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
