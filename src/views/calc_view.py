@@ -18,7 +18,9 @@ from src.logic.core.logic import (
     calcular_resultado_ideal_simplificado,
     calcular_media_horas_operacionais,
     estimate_pedidos_dia_from_base_ativa,
+    estimate_pedidos_dia_from_receita,
     fit_base_ativa_pedidos_dia,
+    fit_receita_pedidos_dia,
     estimate_elasticity_base_to_aux,
     make_target,
     clean_training_dataframe,
@@ -537,8 +539,29 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             cluster_result = indicadores_ctx_estimados["cluster_result"]
             cluster_used = indicadores_ctx_estimados["cluster_used"]
             fluxo_base_ativa_used = False
+            fluxo_receita_used = False
             relacao_base_ativa = {}
-            if base_ativa_override:
+            relacao_receita = {}
+            if receita_total_override:
+                relacao_receita = fit_receita_pedidos_dia(st.session_state.get("fIndicadores"))
+                pedidos_dia_rel = estimate_pedidos_dia_from_receita(receita_total, relacao_receita)
+                if pedidos_dia_rel is not None:
+                    receita_ref = safe_float(receita_total_obs, 0.0)
+                    pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
+                    elasticity = safe_float(relacao_receita.get("elasticity"), 0.0)
+                    if receita_ref > 0 and pedidos_dia_ref > 0 and safe_float(receita_total, 0.0) != receita_ref:
+                        ratio = safe_float(receita_total, 0.0) / receita_ref
+                        if elasticity > 0:
+                            pedidos_dia_rel = pedidos_dia_ref * (ratio ** elasticity)
+                        else:
+                            pedidos_dia_rel = pedidos_dia_ref * ratio
+                    cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
+                    relacao_receita = dict(relacao_receita)
+                    relacao_receita["horas_loja"] = float(horas_operacionais_diarias)
+                    fluxo_receita_used = True
+                else:
+                    st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao ReceitaTotalMes->Pedidos/Dia.")
+            elif base_ativa_override:
                 relacao_base_ativa = fit_base_ativa_pedidos_dia(st.session_state.get("fIndicadores"))
                 pedidos_dia_rel = estimate_pedidos_dia_from_base_ativa(base_ativa, relacao_base_ativa)
                 if pedidos_dia_rel is not None:
@@ -550,11 +573,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             pedidos_dia_rel = pedidos_dia_ref * ratio
                         elif ratio > 1.0 and pedidos_dia_rel <= pedidos_dia_ref:
                             pedidos_dia_rel = pedidos_dia_ref * ratio
-                    horas_media = calcular_media_horas_operacionais(df_estrutura)
                     cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
-                    cluster_values_estimados["Pedidos/Hora"] = pedidos_dia_rel / max(horas_media, 1.0)
                     relacao_base_ativa = dict(relacao_base_ativa)
-                    relacao_base_ativa["horas_media"] = float(horas_media)
+                    relacao_base_ativa["horas_loja"] = float(horas_operacionais_diarias)
                     fluxo_base_ativa_used = True
                 else:
                     st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao BaseAtiva->Pedidos/Dia.")
@@ -596,11 +617,25 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         label_dia = label_overrides.get("Pedidos/Dia", "Pedidos/Dia")
                         delta_hora = deltas.get("Pedidos/Hora")
                         delta_dia = deltas.get("Pedidos/Dia")
-                        st.metric(label_hora, f"{val_hora:.2f}", delta=(f"{delta_hora:+.2f}" if delta_hora is not None else None))
-                        st.metric(label_dia, f"{val_dia:.2f}", delta=(f"{delta_dia:+.2f}" if delta_dia is not None else None))
+                        delta_hora_disp = None
+                        if delta_hora is not None and abs(delta_hora) > 0:
+                            delta_hora_disp = f"{delta_hora:+.2f}"
+                        delta_dia_disp = None
+                        if delta_dia is not None and abs(delta_dia) > 0:
+                            delta_dia_disp = f"{delta_dia:+.2f}"
+                        st.metric(label_hora, f"{val_hora:.2f}", delta=delta_hora_disp)
+                        st.metric(label_dia, f"{val_dia:.2f}", delta=delta_dia_disp)
                     with colFlow2:
+                        delta_fat = deltas.get("Faturamento/Hora")
+                        delta_fat_disp = None
+                        if delta_fat is not None and abs(delta_fat) > 0:
+                            delta_fat_disp = f"{delta_fat:+.2f}"
                         st.metric("Itens/Pedido", f"{values.get('Itens/Pedido', 0.0):.2f}")
-                        st.metric("Faturamento/Hora", f"R$ {values.get('Faturamento/Hora', 0.0):.2f}")
+                        st.metric(
+                            "Faturamento/Hora",
+                            f"R$ {values.get('Faturamento/Hora', 0.0):.2f}",
+                            delta=delta_fat_disp,
+                        )
                     with colFlow3:
                         st.metric("% Retirada", f"{values.get('%Retirada', 0.0):.2f}%")
                     if cluster_used and cluster_result:
@@ -608,6 +643,41 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         st.info(
                             f"Indicadores estimados via clusterização histórica (cluster {cluster_id}/{cluster_result.get('n_clusters')} com {cluster_result.get('cluster_size')} lojas)."
                         )
+
+            # Derivar faturamento/hora a partir de ReceitaTotalMes / (dias operacionais do mes * horas operacionais)
+            dias_operacionais_mes = 0.0
+            horas_operacionais_ref = 0.0
+            if has_lookup:
+                dias_operacionais_mes = safe_float(get_lookup(lookup_row, "DiasOperacionaisMes"), 0.0)
+                horas_operacionais_ref = safe_float(get_lookup(lookup_row, "HorasOperacionais"), 0.0)
+            if horas_operacionais_ref > 24 and dias_operacionais_em_uso > 0:
+                horas_operacionais_ref = horas_operacionais_ref / max(1.0, float(dias_operacionais_em_uso))
+            if horas_operacionais_ref <= 0:
+                horas_operacionais_ref = float(horas_operacionais_diarias)
+            if dias_operacionais_mes <= 0 and df_estrutura is not None and not df_estrutura.empty:
+                if "DiasOperacionaisMes" in df_estrutura.columns:
+                    dias_series = pd.to_numeric(df_estrutura["DiasOperacionaisMes"], errors="coerce")
+                    dias_series = dias_series[dias_series > 0]
+                    if not dias_series.empty:
+                        dias_operacionais_mes = float(dias_series.mean())
+            denom_fat_hora = max(0.1, float(horas_operacionais_ref)) * max(1.0, float(dias_operacionais_mes))
+
+            def _apply_faturamento_hora(values: Dict[str, float], receita_ref: float) -> float:
+                faturamento_val = values.get("Faturamento/Hora", 0.0)
+                if receita_ref > 0 and denom_fat_hora > 0:
+                    faturamento_hora_calc = float(receita_ref) / denom_fat_hora
+                    if faturamento_hora_calc > 0:
+                        faturamento_val = faturamento_hora_calc
+                        values["Faturamento/Hora"] = faturamento_hora_calc
+                return faturamento_val
+
+            receita_ref_estimado = receita_total_obs if (has_lookup and not receita_total_override) else receita_total
+            faturamento_hora_obs = cluster_values_observados.get("Faturamento/Hora", 0.0)
+            if safe_float(faturamento_hora_obs, 0.0) <= 0:
+                faturamento_hora_obs = _apply_faturamento_hora(cluster_values_observados, receita_total_obs)
+            faturamento_hora_est = _apply_faturamento_hora(cluster_values_estimados, receita_ref_estimado)
+            faturamento_hora = faturamento_hora_obs if (has_lookup and not receita_total_override) else faturamento_hora_est
+            cluster_values_estimados["Faturamento/Hora"] = faturamento_hora
 
             op_caption = "Indicadores operacionais (dados historicos da loja selecionada)"
             if has_lookup and manual_override_indicadores:
@@ -617,10 +687,19 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             values_to_render = dict(cluster_values_estimados)
             deltas_disp = {}
             label_overrides: Dict[str, str] = {}
+            horas_ref = max(1.0, float(horas_operacionais_diarias))
+            pedidos_dia_obs_val = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
+            pedidos_dia_est_val = safe_float(cluster_values_estimados.get("Pedidos/Dia"), 0.0)
+            cluster_values_observados["Pedidos/Hora"] = pedidos_dia_obs_val / horas_ref if pedidos_dia_obs_val > 0 else 0.0
+            cluster_values_estimados["Pedidos/Hora"] = pedidos_dia_est_val / horas_ref if pedidos_dia_est_val > 0 else 0.0
             if has_lookup:
                 deltas_disp["Pedidos/Dia"] = cluster_values_estimados.get("Pedidos/Dia", 0.0) - cluster_values_observados.get("Pedidos/Dia", 0.0)
                 deltas_disp["Pedidos/Hora"] = cluster_values_estimados.get("Pedidos/Hora", 0.0) - cluster_values_observados.get("Pedidos/Hora", 0.0)
-            if has_lookup and base_ativa_override:
+                deltas_disp["Faturamento/Hora"] = cluster_values_estimados.get("Faturamento/Hora", 0.0) - cluster_values_observados.get("Faturamento/Hora", 0.0)
+            if has_lookup and receita_total_override:
+                label_overrides["Pedidos/Dia"] = "Pedidos/Dia (estimado por Receita)"
+                label_overrides["Pedidos/Hora"] = "Pedidos/Hora (estimado por Receita)"
+            elif has_lookup and base_ativa_override:
                 label_overrides["Pedidos/Dia"] = "Pedidos/Dia (estimado por BaseAtiva)"
                 label_overrides["Pedidos/Hora"] = "Pedidos/Hora (estimado por BaseAtiva)"
             _render_fluxos_expander(
@@ -642,25 +721,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             itens_pedido_obs = cluster_values_observados["Itens/Pedido"]
             pct_retirada_obs = cluster_values_observados["%Retirada"]
 
-            # Derivar faturamento/hora a partir de Receita Total / mês, dias operacionais e horas operacionais
-            denom_fat_hora = 4.34 * max(1.0, float(dias_operacionais_em_uso)) * max(0.1, float(horas_operacionais_diarias))
-            def _apply_faturamento_hora(values: Dict[str, float], receita_ref: float) -> float:
-                faturamento_val = values.get("Faturamento/Hora", 0.0)
-                if receita_ref > 0 and denom_fat_hora > 0:
-                    faturamento_hora_calc = float(receita_ref) / denom_fat_hora
-                    if faturamento_hora_calc > 0:
-                        faturamento_val = faturamento_hora_calc
-                        values["Faturamento/Hora"] = faturamento_hora_calc
-                return faturamento_val
-
-            receita_ref_estimado = receita_total
-            if has_lookup and not receita_total_override:
-                receita_ref_estimado = receita_total_obs
-            faturamento_hora_obs = _apply_faturamento_hora(cluster_values_observados, receita_total_obs)
-            faturamento_hora = _apply_faturamento_hora(cluster_values, receita_ref_estimado)
-            if has_lookup and not receita_total_override:
-                faturamento_hora = faturamento_hora_obs
-                cluster_values_estimados["Faturamento/Hora"] = faturamento_hora_obs
+            cluster_values["Faturamento/Hora"] = cluster_values_estimados["Faturamento/Hora"]
 
             st.session_state["horas_operacionais_form"] = float(horas_operacionais_semanais)
 

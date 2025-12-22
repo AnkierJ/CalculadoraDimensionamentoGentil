@@ -37,6 +37,14 @@ SYN = {
     "Copa": ["Copa"],
     "HorasOperacionais": ["HorasOperacionais", "Horas Operacionais"],
     "DiasOperacionais": ["DiasOperacionais", "Dias Operacionais", "Dias/semana"],
+    "DiasOperacionaisMes": [
+        "DiasOperacionaisMes",
+        "Dias Operacionais Mes",
+        "DiasOperacionais/Mes",
+        "DiasOperacionais/Mês",
+        "DiasOperacionais/Mì",
+        "DiasOperacionais/Mi",
+    ],
     "%disp": ["%disp", "% disponibilidade", "% disponibilidade operacional"],
     "%absent": ["%absent", "% absent", "%absenteismo"],
 }
@@ -194,6 +202,7 @@ def get_schema_dEstrutura() -> Dict[str, str]:
         "Shopping": "boolean",
         "HorasOperacionais": "float",
         "DiasOperacionais": "float",
+        "DiasOperacionaisMes": "float",
     }
 
 

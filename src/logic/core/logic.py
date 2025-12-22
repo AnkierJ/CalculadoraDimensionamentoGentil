@@ -1619,6 +1619,40 @@ def fit_base_ativa_pedidos_dia(fIndicadores: Optional[pd.DataFrame]) -> Dict[str
     }
 
 
+def fit_receita_pedidos_dia(fIndicadores: Optional[pd.DataFrame]) -> Dict[str, float]:
+    """
+    Ajusta regressao log-log ReceitaTotalMes -> Pedidos/Dia usando fIndicadores.
+    Retorna elasticidade (slope), intercepto e qualidade do ajuste.
+    """
+    if fIndicadores is None or fIndicadores.empty:
+        return {}
+    df = fIndicadores.copy()
+    df = _filter_total_rows_indicadores(df)
+    if "ReceitaTotalMes" not in df.columns or "Pedidos/Dia" not in df.columns:
+        return {}
+    df["ReceitaTotalMes"] = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce")
+    df["Pedidos/Dia"] = pd.to_numeric(df["Pedidos/Dia"], errors="coerce")
+    df = df.dropna(subset=["ReceitaTotalMes", "Pedidos/Dia"])
+    df = df[(df["ReceitaTotalMes"] > 0) & (df["Pedidos/Dia"] > 0)]
+    if len(df) < 3:
+        return {}
+    x = df["ReceitaTotalMes"].astype(float).to_numpy()
+    y = df["Pedidos/Dia"].astype(float).to_numpy()
+    logx = np.log(x)
+    logy = np.log(y)
+    slope, intercept = np.polyfit(logx, logy, deg=1)
+    y_pred = (slope * logx) + intercept
+    ss_res = float(np.sum((logy - y_pred) ** 2))
+    ss_tot = float(np.sum((logy - float(np.mean(logy))) ** 2))
+    r2 = 0.0 if ss_tot <= 0 else max(0.0, 1.0 - (ss_res / ss_tot))
+    return {
+        "elasticity": float(slope),
+        "intercept": float(intercept),
+        "r2": float(r2),
+        "n": int(len(df)),
+    }
+
+
 def estimate_pedidos_dia_from_base_ativa(
     base_ativa: float,
     model_params: Optional[Dict[str, float]],
@@ -1632,6 +1666,25 @@ def estimate_pedidos_dia_from_base_ativa(
         return None
     base_val = safe_float(base_ativa, 0.0)
     pred = (float(coef_a) * base_val * base_val) + (float(coef_b) * base_val) + float(coef_c)
+    if not math.isfinite(pred):
+        return None
+    return float(max(0.0, pred))
+
+
+def estimate_pedidos_dia_from_receita(
+    receita_total: float,
+    model_params: Optional[Dict[str, float]],
+) -> Optional[float]:
+    if not model_params:
+        return None
+    elasticity = model_params.get("elasticity")
+    intercept = model_params.get("intercept")
+    if elasticity is None or intercept is None:
+        return None
+    receita_val = safe_float(receita_total, 0.0)
+    if receita_val <= 0:
+        return None
+    pred = math.exp(float(intercept)) * (float(receita_val) ** float(elasticity))
     if not math.isfinite(pred):
         return None
     return float(max(0.0, pred))
@@ -1775,6 +1828,11 @@ AMOSTRAS_COL_ALIASES: Dict[str, str] = {
 }
 ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
     "dAmostras": AMOSTRAS_COL_ALIASES,
+    "dEstrutura": {
+        "DiasOperacionais/Mì": "DiasOperacionaisMes",
+        "DiasOperacionais/Mês": "DiasOperacionaisMes",
+        "DiasOperacionais/Mes": "DiasOperacionaisMes",
+    },
 }
 @st.cache_data(show_spinner=False)    
 def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.DataFrame:
