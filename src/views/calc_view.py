@@ -542,12 +542,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             fluxo_receita_used = False
             relacao_base_ativa = {}
             relacao_receita = {}
+            pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
+            pedidos_dia_delta_total = 0.0
             if receita_total_override:
                 relacao_receita = fit_receita_pedidos_dia(st.session_state.get("fIndicadores"))
                 pedidos_dia_rel = estimate_pedidos_dia_from_receita(receita_total, relacao_receita)
                 if pedidos_dia_rel is not None:
                     receita_ref = safe_float(receita_total_obs, 0.0)
-                    pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
                     elasticity = safe_float(relacao_receita.get("elasticity"), 0.0)
                     if receita_ref > 0 and pedidos_dia_ref > 0 and safe_float(receita_total, 0.0) != receita_ref:
                         ratio = safe_float(receita_total, 0.0) / receita_ref
@@ -555,18 +556,17 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             pedidos_dia_rel = pedidos_dia_ref * (ratio ** elasticity)
                         else:
                             pedidos_dia_rel = pedidos_dia_ref * ratio
-                    cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
+                    pedidos_dia_delta_total += pedidos_dia_rel - pedidos_dia_ref
                     relacao_receita = dict(relacao_receita)
                     relacao_receita["horas_loja"] = float(horas_operacionais_diarias)
                     fluxo_receita_used = True
                 else:
                     st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao ReceitaTotalMes->Pedidos/Dia.")
-            elif base_ativa_override:
+            if base_ativa_override:
                 relacao_base_ativa = fit_base_ativa_pedidos_dia(st.session_state.get("fIndicadores"))
                 pedidos_dia_rel = estimate_pedidos_dia_from_base_ativa(base_ativa, relacao_base_ativa)
                 if pedidos_dia_rel is not None:
                     base_ref = safe_float(base_ativa_obs, 0.0)
-                    pedidos_dia_ref = safe_float(cluster_values_observados.get("Pedidos/Dia"), 0.0)
                     elasticity = safe_float(relacao_base_ativa.get("elasticity"), 0.0)
                     if base_ref > 0 and pedidos_dia_ref > 0 and safe_float(base_ativa, 0.0) != base_ref:
                         ratio = safe_float(base_ativa, 0.0) / base_ref
@@ -574,12 +574,14 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             pedidos_dia_rel = pedidos_dia_ref * (ratio ** elasticity)
                         else:
                             pedidos_dia_rel = pedidos_dia_ref * ratio
-                    cluster_values_estimados["Pedidos/Dia"] = pedidos_dia_rel
+                    pedidos_dia_delta_total += pedidos_dia_rel - pedidos_dia_ref
                     relacao_base_ativa = dict(relacao_base_ativa)
                     relacao_base_ativa["horas_loja"] = float(horas_operacionais_diarias)
                     fluxo_base_ativa_used = True
                 else:
                     st.warning("Nao foi possivel estimar Pedidos/Dia pela relacao BaseAtiva->Pedidos/Dia.")
+            if receita_total_override or base_ativa_override:
+                cluster_values_estimados["Pedidos/Dia"] = max(0.0, pedidos_dia_ref + pedidos_dia_delta_total)
             if has_lookup:
                 cluster_values_estimados["Itens/Pedido"] = cluster_values_observados.get("Itens/Pedido", 0.0)
                 cluster_values_estimados["%Retirada"] = cluster_values_observados.get("%Retirada", 0.0)
@@ -642,11 +644,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         )
                     with colFlow3:
                         st.metric("% Retirada", f"{values.get('%Retirada', 0.0):.2f}%")
-                    if cluster_used and cluster_result:
-                        cluster_id = int(cluster_result.get("cluster_id", 0)) + 1
-                        st.info(
-                            f"Indicadores estimados via clusterização histórica (cluster {cluster_id}/{cluster_result.get('n_clusters')} com {cluster_result.get('cluster_size')} lojas)."
-                        )
 
             # Derivar faturamento/hora a partir de ReceitaTotalMes / (dias operacionais do mes * horas operacionais)
             dias_operacionais_mes = 0.0
@@ -700,7 +697,10 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 deltas_disp["Pedidos/Dia"] = cluster_values_estimados.get("Pedidos/Dia", 0.0) - cluster_values_observados.get("Pedidos/Dia", 0.0)
                 deltas_disp["Pedidos/Hora"] = cluster_values_estimados.get("Pedidos/Hora", 0.0) - cluster_values_observados.get("Pedidos/Hora", 0.0)
                 deltas_disp["Faturamento/Hora"] = cluster_values_estimados.get("Faturamento/Hora", 0.0) - cluster_values_observados.get("Faturamento/Hora", 0.0)
-            if has_lookup and receita_total_override:
+            if has_lookup and receita_total_override and base_ativa_override:
+                label_overrides["Pedidos/Dia"] = "Pedidos/Dia (estimado por Receita + BaseAtiva)"
+                label_overrides["Pedidos/Hora"] = "Pedidos/Hora (estimado por Receita + BaseAtiva)"
+            elif has_lookup and receita_total_override:
                 label_overrides["Pedidos/Dia"] = "Pedidos/Dia (estimado por Receita)"
                 label_overrides["Pedidos/Hora"] = "Pedidos/Hora (estimado por Receita)"
             elif has_lookup and base_ativa_override:
