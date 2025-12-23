@@ -284,12 +284,63 @@ def render_comparativo_tab(tab_container) -> None:
             return
 
         tabela_comp = pd.DataFrame(linhas_comp)
+        def _delta_urgency_label(delta_val: Optional[float]) -> str:
+            if delta_val is None or (isinstance(delta_val, float) and pd.isna(delta_val)):
+                return ""
+            try:
+                diff = int(delta_val)
+            except Exception:
+                return ""
+            abs_diff = abs(diff)
+            if abs_diff <= 1:
+                label = "Ótimo"
+            elif abs_diff <= 4:
+                label = "Bom"
+            elif abs_diff <= 9:
+                label = "Atenção"
+            else:
+                label = "Alto"
+            return label
+
+        def _delta_urgency_color(label_text: str) -> str:
+            if not isinstance(label_text, str) or not label_text:
+                return "#d8516d"
+            label_norm = (
+                label_text.lower()
+                .replace("●", "")
+                .strip()
+                .replace("ó", "o")
+                .replace("ã", "a")
+                .replace("ç", "c")
+            )
+            if "otimo" in label_norm:
+                color = "#2c9a6c"
+            elif "bom" in label_norm:
+                color = "#4da3f5"
+            elif "atencao" in label_norm:
+                color = "#f0b429"
+            else:
+                color = "#d8516d"
+            return color
+
+        def _format_brl(val: Optional[float]) -> str:
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return ""
+            try:
+                num = float(val)
+            except Exception:
+                return ""
+            formatted = f"{num:,.2f}"
+            formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"R$ {formatted}"
+
         colunas_saida = [
             "Loja",
             "Qtd Aux Real",
             "Qtd Aux Historico",
             "Qtd Aux Ideal",
             "Diferença",
+            "Urgência",
             "Faturamento/Qtd Aux Real",
             "Cluster Porte",
         ]
@@ -300,4 +351,20 @@ def render_comparativo_tab(tab_container) -> None:
             st.subheader(porte)
             subset_exibir = subset.drop(columns=["Porte"], errors="ignore")
             subset_exibir = subset_exibir[[c for c in colunas_saida if c in subset_exibir.columns]]
-            st.dataframe(subset_exibir, use_container_width=True)
+            if "Diferença" in subset_exibir.columns:
+                subset_exibir = subset_exibir.copy()
+                urg_label = subset_exibir["Diferença"].apply(_delta_urgency_label)
+                subset_exibir["Urgência"] = urg_label.apply(lambda v: f"● {v}" if v else "")
+                styled = subset_exibir.style.format(
+                    {"Faturamento/Qtd Aux Real": _format_brl},
+                )
+                styled = styled.applymap(
+                    lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
+                    subset=["Urgência"],
+                )
+                st.dataframe(styled, use_container_width=True)
+            else:
+                styled = subset_exibir.style.format(
+                    {"Faturamento/Qtd Aux Real": _format_brl},
+                )
+                st.dataframe(styled, use_container_width=True)
