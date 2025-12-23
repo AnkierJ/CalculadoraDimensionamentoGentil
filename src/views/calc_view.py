@@ -1413,11 +1413,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
 
-        if model_bundle_ideal is not None:
-            if global_importance_ideal:
-                st.markdown("**Importancia global dos inputs (CatBoost Ideal)**")
-                st.dataframe(pd.DataFrame(global_importance_ideal), use_container_width=True)
-
         if model_errors_hist:
             itens = []
             for key, msg in (model_errors_hist or {}).items():

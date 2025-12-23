@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+import unicodedata
 from typing import Dict, Optional, List
 
 from src.logic.core.logic import (
@@ -50,6 +51,21 @@ def _preds_for_loja(
     return preds
 
 
+def _normalize_col_name(name: object) -> str:
+    text = "" if name is None else str(name).strip()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace(" ", "").replace("_", "").casefold()
+    return text
+
+
+def _find_praca_col(df: pd.DataFrame) -> Optional[str]:
+    for col in df.columns:
+        if _normalize_col_name(col) == "praca":
+            return col
+    return None
+
+
 def render_comparativo_tab(tab_container) -> None:
     with tab_container:
         estrutura_df = st.session_state.get("dEstrutura")
@@ -73,10 +89,54 @@ def render_comparativo_tab(tab_container) -> None:
                 .sort_values()
                 .tolist()
             )
-        multiselect_options = [select_all_label] + loja_opcoes
+        praca_prefix = "[PRAÇA] "
+        praca_to_lojas: Dict[str, List[str]] = {}
+        praca_options: List[str] = []
+        if indicadores_df is not None and not indicadores_df.empty:
+            praca_col = _find_praca_col(indicadores_df)
+            if praca_col and "Loja" in indicadores_df.columns:
+                base_praca = indicadores_df[[praca_col, "Loja"]].copy()
+                base_praca[praca_col] = base_praca[praca_col].astype(str).str.strip()
+                base_praca["Loja"] = base_praca["Loja"].astype(str).str.strip()
+                base_praca = base_praca[
+                    (base_praca[praca_col] != "") & (base_praca["Loja"] != "")
+                ]
+                if not base_praca.empty:
+                    for praca_name, group in base_praca.groupby(praca_col, dropna=False):
+                        praca_label = str(praca_name).strip()
+                        if not praca_label:
+                            continue
+                        lojas_lista = (
+                            group["Loja"]
+                            .dropna()
+                            .astype(str)
+                            .str.strip()
+                            .drop_duplicates()
+                            .tolist()
+                        )
+                        if loja_opcoes:
+                            lojas_lista = [loja for loja in lojas_lista if loja in loja_opcoes]
+                        if lojas_lista:
+                            praca_to_lojas[praca_label] = sorted(lojas_lista)
+                if praca_to_lojas:
+                    praca_options = [f"{praca_prefix}{p}" for p in sorted(praca_to_lojas.keys())]
+
+        multiselect_options = [select_all_label] + praca_options + loja_opcoes
+        def _expand_praca_selections(selections: List[str]) -> List[str]:
+            if not selections or not praca_to_lojas:
+                return selections
+            expanded = list(selections)
+            for opt in selections:
+                if isinstance(opt, str) and opt.startswith(praca_prefix):
+                    praca_name = opt[len(praca_prefix):].strip()
+                    for loja in praca_to_lojas.get(praca_name, []):
+                        if loja in loja_opcoes and loja not in expanded:
+                            expanded.append(loja)
+            return expanded
         def _on_change_lojas():
             selections = st.session_state.get("comparativo_lojas_sel", [])
             selections = [s for s in selections if s in multiselect_options]
+            selections = _expand_praca_selections(selections)
             if select_all_label in selections:
                 # se marcou somente "Selecionar todas", marcar todas
                 if len(selections) == 1:
@@ -84,16 +144,20 @@ def render_comparativo_tab(tab_container) -> None:
                 # se desmarcou alguma depois, remove a flag de selecionar todas
                 elif len(selections) - 1 < len(loja_opcoes):
                     selections = [s for s in selections if s != select_all_label]
+            selections = [s for s in selections if s in multiselect_options]
+            selections = [s for s in multiselect_options if s in selections]
             st.session_state["comparativo_lojas_sel"] = selections
         st.multiselect(
             "Selecionar lojas",
             options=multiselect_options,
             key="comparativo_lojas_sel",
             on_change=_on_change_lojas,
-            help="Escolha uma ou mais lojas para o comparativo.",
+            help="Escolha uma ou mais lojas ou selecione por praca.",
             placeholder="Clique para selecionar",
         )
-        lojas_sel = st.session_state.get("comparativo_lojas_sel", [])
+        lojas_sel = _expand_praca_selections(
+            [s for s in st.session_state.get("comparativo_lojas_sel", []) if s in multiselect_options]
+        )
 
         # Texto resumido para o input seguindo a lógica solicitada
         selected_lojas = [loja for loja in lojas_sel if loja in loja_opcoes]
@@ -198,7 +262,9 @@ def render_comparativo_tab(tab_container) -> None:
             }
             return porte, info
 
-        lojas_sel = st.session_state.get("comparativo_lojas_sel", [])
+        lojas_sel = _expand_praca_selections(
+            [s for s in st.session_state.get("comparativo_lojas_sel", []) if s in multiselect_options]
+        )
         lojas_validas = estrutura_norm["Loja"].astype(str).dropna().drop_duplicates()
         if select_all_label in lojas_sel or not lojas_sel:
             lojas_top: List[str] = lojas_validas.sort_values().tolist()
