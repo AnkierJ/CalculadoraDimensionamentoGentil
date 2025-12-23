@@ -1001,6 +1001,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             anchor_quantile=anchor_quantile,
             cache_version=cache_ver,
         )
+        def _warn_model_issue(bundle: Optional[Dict[str, object]], label: str) -> None:
+            errors = (bundle or {}).get("errors") or {}
+            msg = errors.get("catboost") or errors.get("_geral")
+            if msg:
+                st.warning(f"Modelo {label} indisponivel: {msg}")
+        _warn_model_issue(model_bundle_hist, "historico")
+        _warn_model_issue(model_bundle_ideal, "ideal")
         model_bundle_ideal = _train_cached(
             train_df,
             "ideal",

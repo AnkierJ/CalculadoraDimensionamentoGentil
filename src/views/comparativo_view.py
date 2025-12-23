@@ -226,6 +226,13 @@ def render_comparativo_tab(tab_container) -> None:
             anchor_quantile=anchor_quantile,
             cache_version=cache_ver,
         )
+        def _warn_model_issue(bundle: Optional[Dict[str, object]], label: str) -> None:
+            errors = (bundle or {}).get("errors") or {}
+            msg = errors.get("catboost") or errors.get("_geral")
+            if msg:
+                st.warning(f"Modelo {label} indisponivel: {msg}")
+        _warn_model_issue(model_hist, "historico")
+        _warn_model_issue(model_ideal, "ideal")
 
         linhas_comp: List[Dict[str, object]] = []
         for loja_nome in lojas_top:
