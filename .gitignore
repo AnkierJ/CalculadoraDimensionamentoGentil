@@ -3,6 +3,7 @@ __pycache__/
 .env
 .venv
 venv/
-.streamlit/
+!.streamlit/
+!.streamlit/config.toml
 .DS_Store
 Thumbs.db
