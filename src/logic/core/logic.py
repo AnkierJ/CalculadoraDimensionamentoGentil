@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# =============================================================================
+# Imports
+# =============================================================================
 import math
+import unicodedata
 from sklearn.cluster import KMeans
 import streamlit as st
 from typing import Dict, List, Tuple, Optional, Union
@@ -77,6 +81,128 @@ WEEKS_PER_MONTH = 4.33
 # =============================================================================
 # Helpers importados de utils.helpers
 # =============================================================================
+# =============================================================================
+# Helpers compartilhados (views)
+# =============================================================================
+def _preds_for_loja(
+    bundle: Optional[Dict[str, object]],
+    train_df: pd.DataFrame,
+    feature_row: Dict[str, object],
+    ref_mode: str,
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: float,
+) -> Dict[str, float]:
+    """Retorna previsoes por algoritmo para a loja informada."""
+    if bundle is None or not feature_row:
+        return {}
+    resultados, _ = gerar_resultados_modelos(
+        bundle,
+        train_df,
+        feature_row,
+        ref_mode,
+        horas_disp,
+        margem,
+        anchor_quantile=anchor_quantile,
+        apply_cluster_blend=False,
+        compute_metrics=False,  # evita CV pesado repetido no comparativo
+        algo_order=["catboost"],  # usa apenas o modelo exibido
+    )
+    preds: Dict[str, float] = {}
+    for res in resultados:
+        if res.get("pred") is None:
+            continue
+        try:
+            preds[res.get("key", "")] = float(res.get("pred"))
+        except Exception:
+            continue
+    return preds
+
+
+def _normalize_col_name(name: object) -> str:
+    text = "" if name is None else str(name).strip()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace(" ", "").replace("_", "").casefold()
+    return text
+
+
+def _find_praca_col(df: pd.DataFrame) -> Optional[str]:
+    for col in df.columns:
+        if _normalize_col_name(col) == "praca":
+            return col
+    return None
+
+
+def _compute_absenteismo_prefill(row_dict: Dict[str, object]) -> float:
+    if not row_dict:
+        return float(DEFAULT_ABSENTEISMO)
+    disp_lookup = safe_float(get_lookup(row_dict, "%disp"), 0.0)
+    absent_lookup = safe_float(get_lookup(row_dict, "%absent"), 0.0)
+    if absent_lookup > 0:
+        abs_val = absent_lookup if absent_lookup <= 1 else absent_lookup / 100.0
+        return max(0.0, min(1.0, abs_val))
+    if disp_lookup > 0:
+        disp_val = disp_lookup if disp_lookup <= 1 else disp_lookup / 100.0
+        return max(0.0, min(1.0, 1.0 - disp_val))
+    return float(DEFAULT_ABSENTEISMO)
+
+
+def _coerce_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype="float64")
+    numeric = pd.to_numeric(series, errors="coerce")
+    mask_nan = numeric.isna()
+    if mask_nan.any():
+        fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
+        numeric.loc[mask_nan] = fallback
+    return numeric
+
+
+def _estimate_prateleiras_from_area(
+    area_total_val: float, estrutura_df: Optional[pd.DataFrame]
+) -> Optional[float]:
+    if estrutura_df is None or estrutura_df.empty:
+        return None
+    if area_total_val <= 0:
+        return None
+    if "Area Total" not in estrutura_df.columns or "Qtd Prateleiras" not in estrutura_df.columns:
+        return None
+    area_series = _coerce_numeric_series(estrutura_df["Area Total"])
+    prateleiras_series = _coerce_numeric_series(estrutura_df["Qtd Prateleiras"])
+    mask = (area_series > 0) & (prateleiras_series > 0)
+    if mask.sum() < 2:
+        return None
+    area_series = area_series[mask]
+    prateleiras_series = prateleiras_series[mask]
+    area_vals = area_series.to_numpy(dtype=float)
+    prateleiras_vals = prateleiras_series.to_numpy(dtype=float)
+    denom = float((area_vals * area_vals).sum())
+    if not math.isfinite(denom) or denom <= 0:
+        return None
+    slope = float((area_vals * prateleiras_vals).sum()) / denom
+    if not math.isfinite(slope) or slope <= 0:
+        return None
+    pred = slope * float(area_total_val)
+    ratios = prateleiras_vals / area_vals
+    ratio_min = float(ratios.min())
+    ratio_max = float(ratios.max())
+    if math.isfinite(ratio_min) and math.isfinite(ratio_max) and ratio_min > 0:
+        pred = max(ratio_min * area_total_val, min(ratio_max * area_total_val, pred))
+    if not math.isfinite(pred):
+        return None
+    return max(0.0, pred)
+
+
+def _get_prateleiras_lookup(row_dict: Dict[str, object]) -> float:
+    if not row_dict:
+        return 0.0
+    for key in ("Qtd Prateleiras", "QtdPrateleiras", "Prateleiras"):
+        val = safe_float(row_dict.get(key), 0.0)
+        if val > 0:
+            return float(val)
+    return 0.0
+
 # =============================================================================
 # Processos e cargas
 # =============================================================================

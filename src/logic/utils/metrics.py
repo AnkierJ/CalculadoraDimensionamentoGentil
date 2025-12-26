@@ -1,3 +1,6 @@
+# =============================================================================
+# Imports
+# =============================================================================
 import math
 from typing import Dict, Iterable, Tuple
 
@@ -9,6 +12,9 @@ from sklearn.metrics import (
 )
 
 
+# =============================================================================
+# Metrics
+# =============================================================================
 def mape_safe(y_true: Iterable[float], y_pred: Iterable[float]) -> float:
     """Calcula o MAPE ignorando casos com valor real zero para evitar divisao por zero."""
     y_true_np = np.asarray(y_true, dtype=float)

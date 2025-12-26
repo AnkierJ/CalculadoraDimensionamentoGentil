@@ -1,3 +1,6 @@
+# =============================================================================
+# Imports
+# =============================================================================
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -10,6 +13,9 @@ except ImportError:
     CatBoostRegressor = None
 
 
+# =============================================================================
+# Helpers internos
+# =============================================================================
 def _bool_to_int(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     """Converte campos booleanos em inteiros 0/1 para alimentar o modelo."""
     df = df.copy()
@@ -33,6 +39,9 @@ def _bool_to_int(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     return df
 
 
+# =============================================================================
+# Classes
+# =============================================================================
 class CatBoostQuantileModel:
     """Empacota o CatBoost central + quantis P5/P95, mantendo metadados das features."""
 
@@ -127,6 +136,9 @@ def _prepare_for_catboost(
     return df[feature_names]
 
 
+# =============================================================================
+# API
+# =============================================================================
 def predict_catboost(model, feature_row: Dict[str, object]) -> Dict[str, float]:
     if model is None:
         raise ValueError("Modelo CatBoost nao treinado.")

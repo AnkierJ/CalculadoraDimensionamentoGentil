@@ -1,72 +1,28 @@
+# =============================================================================
+# Imports
+# =============================================================================
 import math
+from typing import Dict, Optional, List
+
 import pandas as pd
 import streamlit as st
-import unicodedata
-from typing import Dict, Optional, List
 
 from src.logic.core.logic import (
     prepare_training_dataframe,
     clean_training_dataframe,
-    gerar_resultados_modelos,
     _train_cached,
     _compute_porte_cluster_context,
     _assign_porte_cluster,
     _is_loja_grande,
+    _find_praca_col,
+    _preds_for_loja,
 )
 from src.logic.data.buscaDeLojas import _get_loja_row, _ensure_loja_key
 from src.logic.utils.helpers import safe_float
 
-
-def _preds_for_loja(
-    bundle: Optional[Dict[str, object]],
-    train_df: pd.DataFrame,
-    feature_row: Dict[str, object],
-    ref_mode: str,
-    horas_disp: float,
-    margem: float,
-    anchor_quantile: float,
-) -> Dict[str, float]:
-    """Retorna previsões por algoritmo para a loja informada."""
-    if bundle is None or not feature_row:
-        return {}
-    resultados, _ = gerar_resultados_modelos(
-        bundle,
-        train_df,
-        feature_row,
-        ref_mode,
-        horas_disp,
-        margem,
-        anchor_quantile=anchor_quantile,
-        apply_cluster_blend=False,
-        compute_metrics=False,  # evita CV pesado repetido no comparativo
-        algo_order=["catboost"],  # usa apenas o modelo exibido
-    )
-    preds: Dict[str, float] = {}
-    for res in resultados:
-        if res.get("pred") is None:
-            continue
-        try:
-            preds[res.get("key", "")] = float(res.get("pred"))
-        except Exception:
-            continue
-    return preds
-
-
-def _normalize_col_name(name: object) -> str:
-    text = "" if name is None else str(name).strip()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = text.replace(" ", "").replace("_", "").casefold()
-    return text
-
-
-def _find_praca_col(df: pd.DataFrame) -> Optional[str]:
-    for col in df.columns:
-        if _normalize_col_name(col) == "praca":
-            return col
-    return None
-
-
+# =============================================================================
+# Render
+# =============================================================================
 def render_comparativo_tab(tab_container) -> None:
     with tab_container:
         estrutura_df = st.session_state.get("dEstrutura")
@@ -76,6 +32,9 @@ def render_comparativo_tab(tab_container) -> None:
         st.subheader("Comparativo Histórico vs Ideal (lojas)")
         # Estilo ajustado mais abaixo para resumo das seleções
 
+        # =============================================================================
+        # Selecao de lojas
+        # =============================================================================
         select_all_label = "Selecionar todas"
         if "comparativo_lojas_sel" not in st.session_state:
             st.session_state["comparativo_lojas_sel"] = []
@@ -182,6 +141,9 @@ def render_comparativo_tab(tab_container) -> None:
             summary_text = "Seleções múltiplas"
             show_summary_only = True
         
+        # =============================================================================
+        # Parametros do comparativo
+        # =============================================================================
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
             anchor_options = [50 + (2.5 * i) for i in range(17)]
@@ -206,6 +168,9 @@ def render_comparativo_tab(tab_container) -> None:
             st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
             submitted = st.button("Realizar Comparativo", type="primary", use_container_width=True)
 
+        # =============================================================================
+        # Validacao e treino base
+        # =============================================================================
         if estrutura_df is None or estrutura_df.empty:
             st.warning("Base de estrutura vazia ou não carregada.")
             return
@@ -312,6 +277,9 @@ def render_comparativo_tab(tab_container) -> None:
         _warn_model_issue(model_hist, "historico")
         _warn_model_issue(model_ideal, "ideal")
 
+        # =============================================================================
+        # Montagem do comparativo
+        # =============================================================================
         linhas_comp: List[Dict[str, object]] = []
         for loja_nome in lojas_top:
             feature_row, _ = _get_loja_row(train_norm, loja_nome)
@@ -486,6 +454,9 @@ def render_comparativo_tab(tab_container) -> None:
                     )
                     st.dataframe(styled, use_container_width=True)
 
+        # =============================================================================
+        # Grafico de dimensionamento
+        # =============================================================================
         st.subheader("Grafico de Dimensionamento (Qtd Aux Real vs Ideal)")
 
         pontos_df = tabela_comp.copy()
@@ -786,6 +757,9 @@ def render_comparativo_tab(tab_container) -> None:
         """
         st.markdown(legend_html, unsafe_allow_html=True)
 
+        # =============================================================================
+        # Resumo
+        # =============================================================================
         st.subheader("Resumo")
 
         resumo_df = tabela_comp.copy()

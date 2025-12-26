@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# =============================================================================
+# Imports
+# =============================================================================
 import base64
 import io
 import numpy as np
@@ -11,6 +14,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+# =============================================================================
+# Constantes e sinonimos
+# =============================================================================
 SYN = {
     "BaseTotal": ["BaseTotal", "Base Total", "Base_Total", "Base"],
     "BaseAtiva": ["BaseAtiva", "Base Ativa", "Base_Ativa"],
@@ -53,6 +59,9 @@ TRUE_BOOL_VALUES = {"VERDADEIRO", "SIM", "S", "TRUE", "T", "1", "YES", "Y"}
 FALSE_BOOL_VALUES = {"FALSO", "NAO", "NǟO", "N", "FALSE", "F", "0", "NO"}
 
 
+# =============================================================================
+# Helpers gerais
+# =============================================================================
 def image_to_base64(path: Union[str, Path]) -> str:
     """Converte o arquivo indicado em string base64 para embutir imagens no app."""
     with open(path, "rb") as f:

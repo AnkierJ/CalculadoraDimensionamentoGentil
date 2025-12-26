@@ -4,11 +4,17 @@
 # Busca por loja
 # =============================================================================
 
+# =============================================================================
+# Imports
+# =============================================================================
 from typing import Dict, List, Optional, Tuple
 import unicodedata
 import pandas as pd
 
 
+# =============================================================================
+# Helpers internos
+# =============================================================================
 def _normalize_loja_key(value) -> str:
     """Normaliza nomes de loja removendo diferencas de caixa e acentuacao."""
     if value is None:
@@ -43,6 +49,9 @@ def _ensure_loja_key(df: Optional[pd.DataFrame], key_col: str = "Loja_norm") -> 
     return out
 
 
+# =============================================================================
+# API
+# =============================================================================
 def carregar_lojas(df_lojas: Optional[pd.DataFrame] = None, path_csv: Optional[str] = None) -> pd.DataFrame:
     """Carrega um DataFrame de lojas a partir de um DF existente ou de um CSV e normaliza a chave."""
     df = df_lojas

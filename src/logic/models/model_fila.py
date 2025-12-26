@@ -1,13 +1,22 @@
+# =============================================================================
+# Imports
+# =============================================================================
 import math
 from typing import Dict
 
 from ..utils.helpers import safe_float
 
 # Parametros padrao da teoria das filas
+# =============================================================================
+# Constantes
+# =============================================================================
 DEFAULT_OCUPACAO_ALVO = 0.80        # % do tempo produtivo (0-1)
 QUEUE_CALIBRATION_DEFAULT = 1.0     # fator base (fixo) para calibrar a carga do modelo de filas
 
 
+# =============================================================================
+# Helpers internos
+# =============================================================================
 def _safe_float(val, default: float = 0.0) -> float:
     """Conversao defensiva para float reutilizando o helper compartilhado."""
     return safe_float(val, default)
@@ -66,6 +75,9 @@ def _estimate_service_time_minutes(feature_row: Dict[str, object]) -> float:
     return 6.0
 
 
+# =============================================================================
+# API
+# =============================================================================
 def estimate_queue_inputs(feature_row: Dict[str, object]) -> Dict[str, float]:
     """
     Retorna parametros (, TMA e ) usados pelos diagnosticos de fila.

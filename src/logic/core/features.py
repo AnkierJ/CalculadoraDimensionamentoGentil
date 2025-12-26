@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# =============================================================================
+# Imports
+# =============================================================================
 from typing import Optional, Tuple
 
 import numpy as np
@@ -9,12 +12,18 @@ from sklearn.cluster import KMeans
 from ..models.model_fila import DEFAULT_OCUPACAO_ALVO
 
 
+# =============================================================================
+# Helpers internos
+# =============================================================================
 def _ensure_series(val, idx) -> pd.Series:
     if isinstance(val, pd.Series):
         return val
     return pd.Series(val, index=idx)
 
 
+# =============================================================================
+# Public API
+# =============================================================================
 def criar_features_fila(df: pd.DataFrame, rho_target: float = DEFAULT_OCUPACAO_ALVO) -> pd.DataFrame:
     """Adiciona c_fila_continuo e auxiliares derivados via teoria das filas."""
     if df is None or df.empty:

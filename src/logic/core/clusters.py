@@ -5,6 +5,9 @@ Utilidades de clusterização (KMeans).
 
 Se ainda não houver uso integrado, estas funções servem como ponto de extensão.
 """
+# =============================================================================
+# Imports
+# =============================================================================
 from typing import Optional
 
 import pandas as pd
@@ -12,6 +15,9 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 
+# =============================================================================
+# API
+# =============================================================================
 def treinar_kmeans(df_features: pd.DataFrame, n_clusters: Optional[int] = None) -> Optional[KMeans]:
     """Treina um KMeans simples nos dados fornecidos."""
     if df_features is None or df_features.empty:

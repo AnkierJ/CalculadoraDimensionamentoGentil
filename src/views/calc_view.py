@@ -1,10 +1,13 @@
+# =============================================================================
+# Imports
+# =============================================================================
 import math
 from typing import Dict, List, Optional
+
 import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from src.logic.data.buscaDeLojas import _get_loja_row
 from src.logic.core.logic import (
     DEFAULT_OCUPACAO_ALVO,
     DEFAULT_ABSENTEISMO,
@@ -13,6 +16,10 @@ from src.logic.core.logic import (
     _format_queue_diag,
     _metric_has_value,
     _train_cached,
+    _compute_absenteismo_prefill,
+    _estimate_prateleiras_from_area,
+    _get_prateleiras_lookup,
+    apply_operacional_defaults_from_lookup,
     avaliar_carga_operacional_ideal,
     calcular_intervalos_modelos,
     calcular_resultado_ideal_simplificado,
@@ -32,6 +39,7 @@ from src.logic.core.logic import (
     preparar_indicadores_operacionais,
     prepare_training_dataframe,
 )
+from src.logic.data.buscaDeLojas import _get_loja_row
 from src.logic.models.model_catboost import get_catboost_feature_importance
 from src.logic.utils.helpers import (
     _norm_code,
@@ -41,12 +49,17 @@ from src.logic.utils.helpers import (
     normalize_processo_nome,
     safe_float,
 )
-from src.logic.core.logic import apply_operacional_defaults_from_lookup
 
 
+# =============================================================================
+# Render principal
+# =============================================================================
 def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     """Renderiza a aba de cálculo até a preparação das features."""
     with tab_calc:
+        # =============================================================================
+        # Modo de calculo
+        # =============================================================================
         st.subheader("Modo de cálculo")
         opcoes = [
             "Machine Learning",
@@ -79,73 +92,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         total_base_ativa_ref = total_refs.get("BaseAtivaTotal", 0.0)
         total_receita_ref = total_refs.get("ReceitaTotalMes", 0.0)
 
-
-        def _compute_absenteismo_prefill(row_dict: Dict[str, object]) -> float:
-            if not row_dict:
-                return float(DEFAULT_ABSENTEISMO)
-            disp_lookup = safe_float(get_lookup(row_dict, "%disp"), 0.0)
-            absent_lookup = safe_float(get_lookup(row_dict, "%absent"), 0.0)
-            if absent_lookup > 0:
-                abs_val = absent_lookup if absent_lookup <= 1 else absent_lookup / 100.0
-                return max(0.0, min(1.0, abs_val))
-            if disp_lookup > 0:
-                disp_val = disp_lookup if disp_lookup <= 1 else disp_lookup / 100.0
-                return max(0.0, min(1.0, 1.0 - disp_val))
-            return float(DEFAULT_ABSENTEISMO)
-
-        def _coerce_numeric_series(series: pd.Series) -> pd.Series:
-            if series is None:
-                return pd.Series(dtype="float64")
-            numeric = pd.to_numeric(series, errors="coerce")
-            mask_nan = numeric.isna()
-            if mask_nan.any():
-                fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
-                numeric.loc[mask_nan] = fallback
-            return numeric
-
-        def _estimate_prateleiras_from_area(area_total_val: float, estrutura_df: Optional[pd.DataFrame]) -> Optional[float]:
-            if estrutura_df is None or estrutura_df.empty:
-                return None
-            if area_total_val <= 0:
-                return None
-            if "Area Total" not in estrutura_df.columns or "Qtd Prateleiras" not in estrutura_df.columns:
-                return None
-            area_series = _coerce_numeric_series(estrutura_df["Area Total"])
-            prateleiras_series = _coerce_numeric_series(estrutura_df["Qtd Prateleiras"])
-            mask = (area_series > 0) & (prateleiras_series > 0)
-            if mask.sum() < 2:
-                return None
-            area_series = area_series[mask]
-            prateleiras_series = prateleiras_series[mask]
-            area_vals = area_series.to_numpy(dtype=float)
-            prateleiras_vals = prateleiras_series.to_numpy(dtype=float)
-            denom = float((area_vals * area_vals).sum())
-            if not math.isfinite(denom) or denom <= 0:
-                return None
-            slope = float((area_vals * prateleiras_vals).sum()) / denom
-            if not math.isfinite(slope) or slope <= 0:
-                return None
-            pred = slope * float(area_total_val)
-            ratios = prateleiras_vals / area_vals
-            ratio_min = float(ratios.min())
-            ratio_max = float(ratios.max())
-            if math.isfinite(ratio_min) and math.isfinite(ratio_max) and ratio_min > 0:
-                pred = max(ratio_min * area_total_val, min(ratio_max * area_total_val, pred))
-            if not math.isfinite(pred):
-                return None
-            return max(0.0, pred)
-
-        def _get_prateleiras_lookup(row_dict: Dict[str, object]) -> float:
-            if not row_dict:
-                return 0.0
-            for key in ("Qtd Prateleiras", "QtdPrateleiras", "Prateleiras"):
-                val = safe_float(row_dict.get(key), 0.0)
-                if val > 0:
-                    return float(val)
-            return 0.0
-
-
+        # =============================================================================
         # Pesquisa de loja
+        # =============================================================================
         st.markdown("**Pesquisar loja existente (opcional)**")
         col_lookup = st.columns([1, 1, 1])
         def _trigger_lookup_enter():
@@ -1622,7 +1571,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             f"Tempo medio: {result_ideal.get('tmedio_min_atendimento', 0.0):.2f} min | "
             f"Fator monotonia: {result_ideal.get('fator_monotonia', fator_monotonia):.2f}"
         )
-# Helpers internos
+# =============================================================================
+# Helpers internos (fila)
+# =============================================================================
 from src.logic.models.model_fila import (
     estimate_queue_inputs,
     calcular_fila,
@@ -1630,6 +1581,9 @@ from src.logic.models.model_fila import (
 )
 
 
+# =============================================================================
+# Constantes
+# =============================================================================
 PROCESSOS_PRIORITARIOS = [
     "Devolução",
     "Reposição de prateleira",

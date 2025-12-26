@@ -1,3 +1,6 @@
+# =============================================================================
+# Imports
+# =============================================================================
 from pathlib import Path
 from typing import Dict
 
@@ -15,10 +18,19 @@ from src.logic.core.logic import (
 )
 
 
+# =============================================================================
+# Render
+# =============================================================================
 def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
     with tab_dados:
         st.subheader("Dados de base")
+        # =============================================================================
+        # Preview / Upload
+        # =============================================================================
         aba_preview, aba_upload = st.tabs(["Base atual (somente leitura)", "Adicionar dados (upload)"])
+        # =============================================================================
+        # Preview
+        # =============================================================================
         with aba_preview:
             st.caption("Pré-visualização das 10 primeiras linhas das tabelas carregadas por padrão do diretório 'data/'.")
             with st.expander("dAmostras"):
@@ -78,6 +90,9 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                         use_container_width=True,
                     )
 
+        # =============================================================================
+        # Upload
+        # =============================================================================
         with aba_upload:
             st.caption("Envie arquivos para ACRESCENTAR dados à base atual. Entradas duplicadas são deduplicadas por chaves básicas.")
             tabs = st.tabs(["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"])
