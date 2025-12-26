@@ -184,10 +184,19 @@ def render_comparativo_tab(tab_container) -> None:
         
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
+            anchor_options = [50 + (2.5 * i) for i in range(17)]
+            raw_anchor = st.session_state.get("anchor_rpa_percent", 60)
+            try:
+                raw_anchor = float(raw_anchor)
+            except Exception:
+                raw_anchor = 60.0
+            if raw_anchor not in anchor_options:
+                raw_anchor = min(anchor_options, key=lambda v: abs(v - raw_anchor))
+
             anchor_percent = st.select_slider(
                 "Âncora receita/aux (%)",
-                options=[50, 55, 60, 65, 70, 75, 80, 85, 90],
-                value=int(st.session_state.get("anchor_rpa_percent", 60)),
+                options=anchor_options,
+                value=raw_anchor,
                 help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, percentil mais alto.",
             )
             st.session_state["anchor_rpa_percent"] = anchor_percent
@@ -787,7 +796,7 @@ def render_comparativo_tab(tab_container) -> None:
         def _dimensionamento_bucket(diff_val: Optional[float]) -> str:
             if diff_val is None or (isinstance(diff_val, float) and pd.isna(diff_val)):
                 return "Dimensionamento Ideal"
-            if abs(diff_val) <= 1:
+            if diff_val == 0:
                 return "Dimensionamento Ideal"
             return "Dimensionamento Abaixo do Ideal" if diff_val > 0 else "Dimensionamento Acima do Ideal"
 
@@ -801,10 +810,10 @@ def render_comparativo_tab(tab_container) -> None:
             _delta_urgency_color("Alto"),
         ]
         faixa_desc = [
-            "Entre y=x-1 e y=x+1",
-            "Entre y=x+2 e y=x+4 (e simétrico)",
-            "Entre y=x+5 e y=x+9 (e simétrico)",
-            "A partir de y=x+10 (e simétrico)",
+            "Módulo da diferença igual a 1 ou 0",
+            "Módulo da diferença entre 2 e 4",
+            "Módulo da diferença entre 5 e 9",
+            "Módulo da diferença igual ou maior que 10",
         ]
         faixa_cols = st.columns(4)
         for idx, (label, color, desc) in enumerate(zip(faixa_labels, faixa_colors, faixa_desc)):

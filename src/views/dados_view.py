@@ -64,8 +64,12 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
 
             if st.session_state.get("downloads_ready"):
                 for nome in ["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"]:
-                    df = st.session_state[nome]
-                    csv_bytes = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+                    path = paths.get(nome)
+                    if path and path.exists():
+                        csv_bytes = path.read_bytes()
+                    else:
+                        df = st.session_state[nome]
+                        csv_bytes = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
                     st.download_button(
                         label=f"⬇️ Baixar {nome}.csv",
                         data=csv_bytes,

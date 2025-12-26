@@ -93,6 +93,57 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 return max(0.0, min(1.0, 1.0 - disp_val))
             return float(DEFAULT_ABSENTEISMO)
 
+        def _coerce_numeric_series(series: pd.Series) -> pd.Series:
+            if series is None:
+                return pd.Series(dtype="float64")
+            numeric = pd.to_numeric(series, errors="coerce")
+            mask_nan = numeric.isna()
+            if mask_nan.any():
+                fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
+                numeric.loc[mask_nan] = fallback
+            return numeric
+
+        def _estimate_prateleiras_from_area(area_total_val: float, estrutura_df: Optional[pd.DataFrame]) -> Optional[float]:
+            if estrutura_df is None or estrutura_df.empty:
+                return None
+            if area_total_val <= 0:
+                return None
+            if "Area Total" not in estrutura_df.columns or "Qtd Prateleiras" not in estrutura_df.columns:
+                return None
+            area_series = _coerce_numeric_series(estrutura_df["Area Total"])
+            prateleiras_series = _coerce_numeric_series(estrutura_df["Qtd Prateleiras"])
+            mask = (area_series > 0) & (prateleiras_series > 0)
+            if mask.sum() < 2:
+                return None
+            area_series = area_series[mask]
+            prateleiras_series = prateleiras_series[mask]
+            area_vals = area_series.to_numpy(dtype=float)
+            prateleiras_vals = prateleiras_series.to_numpy(dtype=float)
+            denom = float((area_vals * area_vals).sum())
+            if not math.isfinite(denom) or denom <= 0:
+                return None
+            slope = float((area_vals * prateleiras_vals).sum()) / denom
+            if not math.isfinite(slope) or slope <= 0:
+                return None
+            pred = slope * float(area_total_val)
+            ratios = prateleiras_vals / area_vals
+            ratio_min = float(ratios.min())
+            ratio_max = float(ratios.max())
+            if math.isfinite(ratio_min) and math.isfinite(ratio_max) and ratio_min > 0:
+                pred = max(ratio_min * area_total_val, min(ratio_max * area_total_val, pred))
+            if not math.isfinite(pred):
+                return None
+            return max(0.0, pred)
+
+        def _get_prateleiras_lookup(row_dict: Dict[str, object]) -> float:
+            if not row_dict:
+                return 0.0
+            for key in ("Qtd Prateleiras", "QtdPrateleiras", "Prateleiras"):
+                val = safe_float(row_dict.get(key), 0.0)
+                if val > 0:
+                    return float(val)
+            return 0.0
+
 
         # Pesquisa de loja
         st.markdown("**Pesquisar loja existente (opcional)**")
@@ -204,6 +255,14 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         st.session_state["lookup_row"] = _standardize_row(combined)
                         st.session_state["absenteismo_input"] = _compute_absenteismo_prefill(st.session_state.get("lookup_row", {}))
                         apply_operacional_defaults_from_lookup(st.session_state["lookup_row"])
+                        # Reseta frequencias simuladas ao trocar de loja para permitir novo prefill automatico.
+                        loja_lookup_prev = st.session_state.get("lookup_loja_nome")
+                        loja_lookup_now = str(combined.get("Loja", lookup_code)).strip()
+                        if loja_lookup_prev and loja_lookup_prev != loja_lookup_now:
+                            sim_freq = st.session_state.get("sim_processos_freq")
+                            if isinstance(sim_freq, dict):
+                                sim_freq.pop(normalize_processo_nome("Mudanca de planograma"), None)
+                        st.session_state["lookup_loja_nome"] = loja_lookup_now
                         # Reinicializa indicadores de entrada ao carregar nova loja
                         st.session_state["indicadores_reset_payload"] = {
                             "base_ativa": safe_float(get_lookup(combined, "BaseAtiva"), 0.0),
@@ -862,8 +921,22 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.session_state["sim_processos_tempos_global"] = tempo_global_dict
                 st.session_state["sim_processos_tempos_loja"] = tempo_loja_dict
 
-                # Não inferimos frequências automaticamente no modo simplificado; o usuário preenche todas.
+                # Frequencias no modo simplificado: so planograma tem prefill automatico.
                 auto_freqs: Dict[str, float] = {}
+                auto_freq_notes: Dict[str, str] = {}
+                planograma_key = normalize_processo_nome("Mudanca de planograma")
+                if has_lookup:
+                    prateleiras_lookup = _get_prateleiras_lookup(lookup_prefill)
+                    if prateleiras_lookup > 0:
+                        auto_freqs[planograma_key] = float(round(prateleiras_lookup))
+                        auto_freq_notes[planograma_key] = "Valor puxado da base da loja (Qtd Prateleiras)."
+                    else:
+                        prateleiras_est = _estimate_prateleiras_from_area(area_total, df_estrutura)
+                        if prateleiras_est is not None and prateleiras_est > 0:
+                            auto_freqs[planograma_key] = float(round(prateleiras_est))
+                            auto_freq_notes[planograma_key] = (
+                                "Estimado por regressao (Area Total x Qtd Prateleiras) usando dEstrutura."
+                            )
                 sim_processos_freq_state = st.session_state.get("sim_processos_freq", {}) or {}
                 sim_processos_tempo_state = st.session_state.get("sim_processos_tempos_custom", {}) or {}
                 with st.expander("Processos complementares (tempos e frequências)"):
@@ -896,6 +969,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                                     key=f"sim_proc_tempo_{proc_norm}",
                                 )
                             with col_freq:
+                                freq_help = None
+                                if proc_norm == planograma_key:
+                                    freq_help = "Para Mudanca de planograma, a frequencia e a quantidade de prateleiras da loja."
                                 freq_val = st.number_input(
                                     "Freq/semana",
                                     min_value=0.0,
@@ -903,9 +979,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                                     value=float(freq_default),
                                     format="%.1f",
                                     key=f"sim_proc_freq_{proc_norm}",
+                                    help=freq_help,
                                 )
                             if usa_media_geral:
                                 st.caption("Tempo vindo da média geral das lojas (sem dado específico da loja).")
+                            if proc_norm == planograma_key:
+                                st.caption("Mudanca de planograma: frequencia = quantidade de prateleiras da loja.")
+                                auto_note = auto_freq_notes.get(proc_norm)
+                                if auto_note and (proc_norm not in sim_processos_freq_state or sim_processos_freq_state.get(proc_norm, 0) <= 0):
+                                    st.caption(f"Prefill automatico aplicado: {auto_note}")
                         updated_tempos[proc_norm] = tempo_val
                         updated_freqs[proc_norm] = freq_val
                 st.session_state["sim_processos_tempos_custom"] = updated_tempos
@@ -927,13 +1009,22 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
                 if modo_ml:
 
+                    anchor_options = [50 + (2.5 * i) for i in range(17)]
+                    raw_anchor = st.session_state.get("anchor_rpa_percent", 60)
+                    try:
+                        raw_anchor = float(raw_anchor)
+                    except Exception:
+                        raw_anchor = 60.0
+                    if raw_anchor not in anchor_options:
+                        raw_anchor = min(anchor_options, key=lambda v: abs(v - raw_anchor))
+
                     anchor_percent = st.select_slider(
 
                         "Âncora receita/aux (%)",
 
-                        options=[50, 55, 60, 65, 70, 75, 80, 85, 90],
+                        options=anchor_options,
 
-                        value=int(st.session_state.get("anchor_rpa_percent", 60)),
+                        value=raw_anchor,
 
                         help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, prefira percentil mais alto.",
 
