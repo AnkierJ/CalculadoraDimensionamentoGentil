@@ -1,3 +1,4 @@
+import math
 import pandas as pd
 import streamlit as st
 import unicodedata
@@ -213,6 +214,8 @@ def render_comparativo_tab(tab_container) -> None:
         estrutura_norm = _ensure_loja_key(estrutura_df)
         train_norm = _ensure_loja_key(train_df)
         pessoas_norm = _ensure_loja_key(pessoas_df)
+        indicadores_norm = _ensure_loja_key(indicadores_df) if indicadores_df is not None else None
+        praca_col = _find_praca_col(indicadores_df) if indicadores_df is not None else None
         if "Loja" not in estrutura_norm.columns:
             st.warning("Coluna 'Loja' não encontrada na base de estrutura.")
             return
@@ -321,6 +324,12 @@ def render_comparativo_tab(tab_container) -> None:
                 if pessoas_row:
                     qtd_aux_real = safe_float(pessoas_row.get("QtdAux"))
             porte_label, porte_info = _classificar_porte(feature_row)
+
+            praca_val = None
+            if indicadores_norm is not None and praca_col:
+                praca_row, _ = _get_loja_row(indicadores_norm, loja_nome)
+                if praca_row:
+                    praca_val = str(praca_row.get(praca_col, "")).strip() or None
             preds_hist = _preds_for_loja(model_hist, train_df, feature_row, "historico", horas_disp, margem, anchor_quantile)
             preds_ideal = _preds_for_loja(model_ideal, train_df, feature_row, "ideal", horas_disp, margem, anchor_quantile)
             qtd_hist = preds_hist.get("catboost")
@@ -349,6 +358,7 @@ def render_comparativo_tab(tab_container) -> None:
                     "Faturamento/Qtd Aux Real": receita_por_aux_real,
                     "Porte": porte_label,
                     "Cluster Porte": porte_info.get("porte_code") if porte_info else None,
+                    "Praca": praca_val,
                 }
             )
 
@@ -407,6 +417,14 @@ def render_comparativo_tab(tab_container) -> None:
             formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
             return f"R$ {formatted}"
 
+        def _expand_axis(min_val: float, max_val: float) -> tuple[float, float]:
+            if min_val == max_val:
+                min_val -= 1
+                max_val += 1
+            span = max_val - min_val
+            pad = max(1.0, span * 0.05)
+            return float(min_val - pad), float(max_val + pad)
+
         colunas_saida = [
             "Loja",
             "Qtd Aux Real",
@@ -417,27 +435,423 @@ def render_comparativo_tab(tab_container) -> None:
             "Faturamento/Qtd Aux Real",
             "Cluster Porte",
         ]
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stExpander"] summary,
+            div[data-testid="stExpander"] summary > div,
+            div[data-testid="stExpander"] summary span,
+            div[data-testid="stExpander"] summary p {
+                font-size: 1.25rem !important;
+                font-weight: 500 !important;
+                line-height: 1.2 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         for porte in ("Loja grande", "Loja média", "Loja pequena"):
             subset = tabela_comp.loc[tabela_comp["Porte"] == porte].reset_index(drop=True)
-            if subset.empty:
-                continue
-            st.subheader(porte)
-            subset_exibir = subset.drop(columns=["Porte"], errors="ignore")
-            subset_exibir = subset_exibir[[c for c in colunas_saida if c in subset_exibir.columns]]
-            if "Diferença" in subset_exibir.columns:
-                subset_exibir = subset_exibir.copy()
-                urg_label = subset_exibir["Diferença"].apply(_delta_urgency_label)
-                subset_exibir["Urgência"] = urg_label.apply(lambda v: f"● {v}" if v else "")
-                styled = subset_exibir.style.format(
-                    {"Faturamento/Qtd Aux Real": _format_brl},
+            count_label = f"{porte} ({len(subset)})"
+            with st.expander(count_label, expanded=True):
+                if subset.empty:
+                    st.info("Sem registros.")
+                    continue
+                subset_exibir = subset.drop(columns=["Porte"], errors="ignore")
+                subset_exibir = subset_exibir[[c for c in colunas_saida if c in subset_exibir.columns]]
+                if "Diferença" in subset_exibir.columns:
+                    subset_exibir = subset_exibir.copy()
+                    urg_label = subset_exibir["Diferença"].apply(_delta_urgency_label)
+                    subset_exibir["Urgência"] = urg_label.apply(lambda v: f"• {v}" if v else "")
+                    styled = subset_exibir.style.format(
+                        {"Faturamento/Qtd Aux Real": _format_brl},
+                    )
+                    styled = styled.applymap(
+                        lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
+                        subset=["Urgência"],
+                    )
+                    st.dataframe(styled, use_container_width=True)
+                else:
+                    styled = subset_exibir.style.format(
+                        {"Faturamento/Qtd Aux Real": _format_brl},
+                    )
+                    st.dataframe(styled, use_container_width=True)
+
+        st.subheader("Grafico de Dimensionamento (Qtd Aux Real vs Ideal)")
+
+        pontos_df = tabela_comp.copy()
+        pontos_df["Qtd Aux Real Plot"] = pd.to_numeric(
+            pontos_df["Qtd Aux Real"], errors="coerce"
+        ).fillna(pd.to_numeric(pontos_df["Qtd Aux Historico"], errors="coerce"))
+        pontos_df["Qtd Aux Ideal Plot"] = pd.to_numeric(
+            pontos_df["Qtd Aux Ideal"], errors="coerce"
+        )
+        pontos_df["Faturamento/Qtd Aux Real (R$)"] = pontos_df[
+            "Faturamento/Qtd Aux Real"
+        ].apply(_format_brl)
+        pontos_df["Praca"] = pontos_df["Praca"].fillna("").astype(str)
+        pontos_df = pontos_df.dropna(subset=["Qtd Aux Real Plot", "Qtd Aux Ideal Plot"])
+
+        if pontos_df.empty:
+            st.info("Sem pontos validos para o grafico de comparativo.")
+            return
+
+        hist_vals = pd.to_numeric(pontos_df["Qtd Aux Historico"], errors="coerce")
+        ideal_vals = pd.to_numeric(pontos_df["Qtd Aux Ideal"], errors="coerce")
+        max_val = max(float(hist_vals.max(skipna=True)), float(ideal_vals.max(skipna=True)))
+        if not math.isfinite(max_val):
+            alt_max = pd.to_numeric(pontos_df["Qtd Aux Ideal Plot"], errors="coerce").max(skipna=True)
+            max_val = float(alt_max) if pd.notna(alt_max) else 0.0
+        step = 5
+        upper = max(step, int(math.ceil(max_val / step) * step))
+        if upper == int(max_val) and upper % step == 0:
+            upper += step
+        x_min, x_max = 0.0, float(upper)
+        y_min, y_max = 0.0, float(upper)
+
+        band_step = 0.25
+        total_steps = int(round((x_max - x_min) / band_step))
+        x_values = [x_min + (i * band_step) for i in range(total_steps + 1)]
+        tick_values = list(range(0, upper + 1, step))
+
+        offset_max = max(
+            abs(y_max - x_min),
+            abs(y_min - x_max),
+            abs(y_max - x_max),
+            abs(y_min - x_min),
+            10,
+        )
+
+        band_defs = [
+            {"label": "Otimo", "color": "#2c9a6c", "ranges": [(-1.5, 1.5)]},
+            {"label": "Bom", "color": "#4da3f5", "ranges": [(1.5, 4.5), (-4.5, -1.5)]},
+            {"label": "Atencao", "color": "#f0b429", "ranges": [(4.5, 9.5), (-9.5, -4.5)]},
+            {"label": "Alto", "color": "#d8516d", "ranges": [(9.5, offset_max), (-offset_max, -9.5)]},
+        ]
+
+        band_layers: List[Dict[str, object]] = []
+        for band in band_defs:
+            for low, high in band["ranges"]:
+                if high <= low:
+                    continue
+                band_layers.append(
+                    {
+                        "data": {
+                            "sequence": {
+                                "start": x_min,
+                                "stop": x_max + band_step,
+                                "step": band_step,
+                                "as": "x",
+                            }
+                        },
+                        "transform": [
+                            {
+                                "calculate": f"max({y_min}, datum.x + ({low}))",
+                                "as": "y_lower",
+                            },
+                            {
+                                "calculate": f"min({y_max}, datum.x + ({high}))",
+                                "as": "y_upper",
+                            },
+                            {"filter": "datum.y_upper > datum.y_lower"},
+                        ],
+                        "mark": {"type": "area", "opacity": 0.15, "clip": True, "tooltip": None},
+                        "encoding": {
+                            "x": {
+                                "field": "x",
+                                "type": "quantitative",
+                                "scale": {"domain": [x_min, x_max]},
+                            },
+                            "y": {
+                                "field": "y_upper",
+                                "type": "quantitative",
+                                "scale": {"domain": [y_min, y_max]},
+                            },
+                            "y2": {"field": "y_lower"},
+                            "color": {"value": band["color"]},
+                        },
+                    }
                 )
-                styled = styled.applymap(
-                    lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
-                    subset=["Urgência"],
+
+        line_records = [{"x": x, "y": x} for x in x_values]
+
+        x_mid = (x_min + x_max) / 2.0
+        delta = max(1.5, (y_max - y_min) * 0.15)
+        corner_pad = max(1.5, (y_max - y_min) * 0.06)
+        upper_text = {
+            "x": x_min + 1,
+            "y": y_max - corner_pad,
+            "label": "Dimensionamento\nacima do ideal",
+        }
+        lower_text = {
+            "x": x_max - 1,
+            "y": y_min + corner_pad + 2,
+            "label": "Dimensionamento\nabaixo do ideal",
+        }
+
+        line_layer = {
+            "data": {"values": line_records},
+            "mark": {
+                "type": "line",
+                "color": "#2d2d2d",
+                "strokeDash": [6, 4],
+                "strokeWidth": 1,
+            },
+            "encoding": {
+                "x": {
+                    "field": "x",
+                    "type": "quantitative",
+                    "scale": {"domain": [x_min, x_max]},
+                },
+                "y": {
+                    "field": "y",
+                    "type": "quantitative",
+                    "scale": {"domain": [y_min, y_max]},
+                },
+            },
+        }
+        upper_text_layer = {
+            "data": {"values": [upper_text]},
+            "mark": {
+                "type": "text",
+                "fontSize": 24,
+                "fontWeight": "bold",
+                "color": "#2d2d2d",
+                "lineBreak": "\n",
+                "align": "left",
+                "baseline": "top",
+                "tooltip": None,
+            },
+            "encoding": {
+                "x": {
+                    "field": "x",
+                    "type": "quantitative",
+                    "scale": {"domain": [x_min, x_max]},
+                },
+                "y": {
+                    "field": "y",
+                    "type": "quantitative",
+                    "scale": {"domain": [y_min, y_max]},
+                },
+                "text": {"field": "label"},
+            },
+        }
+        lower_text_layer = {
+            "data": {"values": [lower_text]},
+            "mark": {
+                "type": "text",
+                "fontSize": 24,
+                "fontWeight": "bold",
+                "color": "#2d2d2d",
+                "lineBreak": "\n",
+                "align": "right",
+                "baseline": "bottom",
+                "tooltip": None,
+            },
+            "encoding": {
+                "x": {
+                    "field": "x",
+                    "type": "quantitative",
+                    "scale": {"domain": [x_min, x_max]},
+                },
+                "y": {
+                    "field": "y",
+                    "type": "quantitative",
+                    "scale": {"domain": [y_min, y_max]},
+                },
+                "text": {"field": "label"},
+            },
+        }
+        points_layer = {
+            "data": {"values": pontos_df.to_dict(orient="records")},
+            "mark": {"type": "point", "filled": True, "size": 80, "color": "#1f2933"},
+            "encoding": {
+                "x": {
+                    "field": "Qtd Aux Ideal Plot",
+                    "type": "quantitative",
+                    "scale": {"domain": [x_min, x_max]},
+                    "axis": {
+                        "title": "Qtd Aux Ideal",
+                        "tickMinStep": 5,
+                        "values": tick_values,
+                        "format": ".0f",
+                        "grid": True,
+                    },
+                },
+                "y": {
+                    "field": "Qtd Aux Real Plot",
+                    "type": "quantitative",
+                    "scale": {"domain": [y_min, y_max]},
+                    "axis": {
+                        "title": "Qtd Aux Real",
+                        "tickMinStep": 5,
+                        "values": tick_values,
+                        "format": ".0f",
+                        "grid": True,
+                    },
+                },
+                "tooltip": [
+                    {"field": "Loja", "type": "nominal", "title": "Loja"},
+                    {"field": "Praca", "type": "nominal", "title": "Praca"},
+                    {
+                        "field": "Qtd Aux Historico",
+                        "type": "quantitative",
+                        "title": "Qtd Aux Historico",
+                    },
+                    {
+                        "field": "Qtd Aux Ideal",
+                        "type": "quantitative",
+                        "title": "Qtd Aux Ideal",
+                    },
+                    {
+                        "field": "Faturamento/Qtd Aux Real (R$)",
+                        "type": "nominal",
+                        "title": "Faturamento/Aux Real",
+                    },
+                ],
+            },
+        }
+
+        chart_spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "width": "container",
+            "height": "container",
+            "autosize": {"type": "fit", "contains": "padding"},
+            "layer": band_layers + [line_layer, upper_text_layer, lower_text_layer, points_layer],
+        }
+
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stFullScreenFrame"] {
+                overflow-x: hidden !important;
+            }
+            div[data-testid="stFullScreenFrame"] > div {
+                display: flex !important;
+                justify-content: center !important;
+            }
+            div[data-testid="stVegaLiteChart"] {
+                width: 100% !important;
+                max-width: 100% !important;
+                height: calc(100vh - 150px) !important;
+                max-height: calc(100vh - 150px) !important;
+                padding-right: 12px !important;
+                margin-left: auto !important;
+                margin-right: auto !important;
+                box-sizing: border-box !important;
+                overflow: hidden !important;
+            }
+            div[data-testid="stVegaLiteChart"] > div {
+                width: 100% !important;
+                height: 100% !important;
+            }
+            div[data-testid="stVegaLiteChart"] + div[data-testid="stVerticalBlock"] {
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.vega_lite_chart(chart_spec, use_container_width=True)
+
+        legend_html = """
+        <div style="display:flex; gap:1.2rem; flex-wrap:wrap; align-items:center; justify-content:center; margin-top:0;">
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <span style="width:12px; height:12px; background:#2c9a6c; display:inline-block; border-radius:2px;"></span>
+            <span>Otimo (<= 1)</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <span style="width:12px; height:12px; background:#4da3f5; display:inline-block; border-radius:2px;"></span>
+            <span>Bom (2 a 4)</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <span style="width:12px; height:12px; background:#f0b429; display:inline-block; border-radius:2px;"></span>
+            <span>Atencao (5 a 9)</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <span style="width:12px; height:12px; background:#d8516d; display:inline-block; border-radius:2px;"></span>
+            <span>Alto (>= 10)</span>
+          </div>
+        </div>
+        """
+        st.markdown(legend_html, unsafe_allow_html=True)
+
+        st.subheader("Resumo")
+
+        resumo_df = tabela_comp.copy()
+        resumo_df["Diferença_num"] = pd.to_numeric(resumo_df["Diferença"], errors="coerce")
+        resumo_df["Urgencia_label"] = resumo_df["Diferença_num"].apply(_delta_urgency_label)
+        resumo_df["Urgencia_color"] = resumo_df["Urgencia_label"].apply(_delta_urgency_color)
+
+        def _dimensionamento_bucket(diff_val: Optional[float]) -> str:
+            if diff_val is None or (isinstance(diff_val, float) and pd.isna(diff_val)):
+                return "Dimensionamento Ideal"
+            if abs(diff_val) <= 1:
+                return "Dimensionamento Ideal"
+            return "Dimensionamento Abaixo do Ideal" if diff_val > 0 else "Dimensionamento Acima do Ideal"
+
+        resumo_df["Dimensionamento"] = resumo_df["Diferença_num"].apply(_dimensionamento_bucket)
+
+        faixa_labels = ["Ótimo", "Bom", "Atenção", "Alto"]
+        faixa_colors = [
+            _delta_urgency_color("Ótimo"),
+            _delta_urgency_color("Bom"),
+            _delta_urgency_color("Atenção"),
+            _delta_urgency_color("Alto"),
+        ]
+        faixa_desc = [
+            "Entre y=x-1 e y=x+1",
+            "Entre y=x+2 e y=x+4 (e simétrico)",
+            "Entre y=x+5 e y=x+9 (e simétrico)",
+            "A partir de y=x+10 (e simétrico)",
+        ]
+        faixa_cols = st.columns(4)
+        for idx, (label, color, desc) in enumerate(zip(faixa_labels, faixa_colors, faixa_desc)):
+            count_val = int((resumo_df["Urgencia_label"] == label).sum())
+            with faixa_cols[idx]:
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid #e5e7eb; border-radius:8px; padding:0.75rem;">
+                      <div style="display:flex; align-items:center; gap:0.5rem;">
+                        <span style="width:12px; height:12px; background:{color}; display:inline-block; border-radius:2px;"></span>
+                        <strong style="font-size:1rem;">{label}</strong>
+                      </div>
+                      <div style="color:#4b5563; font-size:0.9rem; margin-top:0.35rem;">{desc}</div>
+                      <div style="font-size:1.4rem; font-weight:700; margin-top:0.35rem;">{count_val}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
-                st.dataframe(styled, use_container_width=True)
-            else:
-                styled = subset_exibir.style.format(
-                    {"Faturamento/Qtd Aux Real": _format_brl},
+        st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
+
+        bucket_order = [
+            "Dimensionamento Abaixo do Ideal",
+            "Dimensionamento Ideal",
+            "Dimensionamento Acima do Ideal",
+        ]
+        bucket_cols = st.columns(3)
+        for idx, bucket in enumerate(bucket_order):
+            bucket_df = resumo_df.loc[resumo_df["Dimensionamento"] == bucket].copy()
+            total_diff = bucket_df["Diferença_num"].dropna().sum()
+            lojas_list = bucket_df[
+                ["Loja", "Urgencia_color", "Qtd Aux Ideal", "Qtd Aux Historico"]
+            ].dropna(subset=["Loja"]).values.tolist()
+            bullets = "".join(
+                f"<li style='margin-bottom:0.25rem; list-style:none;'>"
+                f"<span style='display:inline-block; width:8px; height:8px; background:{color}; border-radius:50%; margin-right:0.4rem;'></span>"
+                f"{loja} <span style='color:#4b5563; font-size:0.85rem;'>(Ideal: {ideal}, Hist.: {hist})</span></li>"
+                for loja, color, ideal, hist in lojas_list
+            )
+            with bucket_cols[idx]:
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid #e5e7eb; border-radius:8px; padding:0.75rem; height:100%;">
+                      <strong style="font-size:1rem;">{bucket}</strong>
+                      <ul style="margin:0.6rem 0 0.4rem 0; padding:0;">{bullets or "<li style='list-style:none;'>Sem lojas</li>"}</ul>
+                      <hr style="border:none; border-top:1px solid #e5e7eb; margin:0.6rem 0;" />
+                      <div style="font-weight:700;">TOTAL: {int(total_diff) if pd.notna(total_diff) else 0}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
-                st.dataframe(styled, use_container_width=True)
