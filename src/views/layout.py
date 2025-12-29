@@ -168,7 +168,7 @@ def render_header() -> None:
             <img class="kalk-logo-kalk" src="data:image/svg+xml;base64,{logo_kalk}">
             <div class="kalk-header-text">
                 <h2 class="kalk-header-title">Calculadora de Dimensionamento de Time</h2>
-                <p class="kalk-header-desc">O modelo considera uma base consolidada de dados da operação (caracterÇðsticas estruturais, fluxo de pedidos, desempenho comercial e padrões de processos) para calcular tanto o <b>dimensionamento esperados pelo padrão atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
+                <p class="kalk-header-desc">O modelo considera uma base consolidada de dados da operação (características estruturais, fluxo de pedidos, desempenho comercial e padrões de processos) para calcular tanto o <b>dimensionamento esperados pelo padrão atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
             </div>
         </div>
     </div>
