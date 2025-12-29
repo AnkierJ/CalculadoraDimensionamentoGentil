@@ -25,6 +25,27 @@ def inject_global_styles() -> None:
             padding-left: 120px !important;
             padding-right: 120px !important;
         }
+        @media (max-width: 1200px) {
+            .main .block-container,
+            [data-testid="block-container"] {
+                padding-left: 64px !important;
+                padding-right: 64px !important;
+            }
+        }
+        @media (max-width: 900px) {
+            .main .block-container,
+            [data-testid="block-container"] {
+                padding-left: 32px !important;
+                padding-right: 32px !important;
+            }
+        }
+        @media (max-width: 640px) {
+            .main .block-container,
+            [data-testid="block-container"] {
+                padding-left: 16px !important;
+                padding-right: 16px !important;
+            }
+        }
         /* Ajusta barras laterais (sidebar) */
         [data-testid="stSidebar"] {
             width: 240px;
@@ -32,6 +53,11 @@ def inject_global_styles() -> None:
         [data-testid="stSidebar"] > div:first-child {
             padding-left: 0.8rem;
             padding-right: 0.8rem;
+        }
+        @media (max-width: 900px) {
+            [data-testid="stSidebar"] {
+                width: 200px;
+            }
         }
         /* Forçar o radio a ocupar 100% */
         .stRadio > div {
@@ -54,6 +80,71 @@ def inject_global_styles() -> None:
             flex: 1 1 0;           /* mesmas larguras para as 3 abas */
             text-align: center;
         }
+        /* Header responsivo */
+        .kalk-header {
+            width: 100%;
+        }
+        .kalk-header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            text-align: center;
+        }
+        .kalk-header-top img {
+            max-width: 100%;
+            height: auto;
+        }
+        .kalk-logo-nex,
+        .kalk-logo-gentil {
+            width: clamp(150px, 22vw, 220px);
+        }
+        .kalk-header-main {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+            text-align: center;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .kalk-logo-kalk {
+            width: clamp(120px, 20vw, 180px);
+            height: auto;
+        }
+        .kalk-header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            max-width: 860px;
+        }
+        .kalk-header-title {
+            margin: 0;
+            font-size: clamp(1.4rem, 2.6vw, 2rem);
+        }
+        .kalk-header-desc {
+            margin: 0;
+            padding: 0 2.5rem;
+            line-height: 1.5;
+        }
+        @media (max-width: 900px) {
+            .kalk-header-main {
+                gap: 16px;
+            }
+            .kalk-header-desc {
+                padding: 0 1.5rem;
+            }
+        }
+        @media (max-width: 640px) {
+            .kalk-header-top {
+                justify-content: center;
+            }
+            .kalk-header-desc {
+                padding: 0;
+            }
+        }
     </style>
     """,
         unsafe_allow_html=True,
@@ -67,30 +158,18 @@ def render_header() -> None:
     logo_kalk = image_to_base64("src/assets/logoKALK.svg")
     st.markdown(
         f"""
-    <div style="
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        text-align:center;
-        width:100%;
-    ">
-        <img src="data:image/svg+xml;base64,{logo_nex}" width="220">
-        <img src="data:image/png;base64,{logo_gentil}" width="220">
-    </div>
-    <hr>
-    <div style="
-        display:flex;
-        justify-self: start;
-        justify-content: center;
-        align-items:center;
-        text-align:center;
-        width:100%;
-        margin-bottom: 20px;
-    ">
-        <img src="data:image/svg+xml;base64,{logo_kalk}" width="180" style="margin-right: 20px">
-        <div style="display: flex; flex-direction: column">
-            <h2>Calculadora de Dimensionamento de Time</h2>
-            <p style="padding-inline: 100px">O modelo considera uma base consolidada de dados da operação (características estruturais, fluxo de pedidos, desempenho comercial e padrões de processos) para calcular tanto o <b>dimensionamento esperados pelo padrão atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
+    <div class="kalk-header">
+        <div class="kalk-header-top">
+            <img class="kalk-logo-nex" src="data:image/svg+xml;base64,{logo_nex}">
+            <img class="kalk-logo-gentil" src="data:image/png;base64,{logo_gentil}">
+        </div>
+        <hr>
+        <div class="kalk-header-main">
+            <img class="kalk-logo-kalk" src="data:image/svg+xml;base64,{logo_kalk}">
+            <div class="kalk-header-text">
+                <h2 class="kalk-header-title">Calculadora de Dimensionamento de Time</h2>
+                <p class="kalk-header-desc">O modelo considera uma base consolidada de dados da operaÇõÇœo (caracterÇðsticas estruturais, fluxo de pedidos, desempenho comercial e padrÇæes de processos) para calcular tanto o <b>dimensionamento esperados pelo padrÇœo atual</b> quanto a <b>quantidade ideal estimada</b> de auxiliares.</p>
+            </div>
         </div>
     </div>
     """,

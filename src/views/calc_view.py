@@ -1355,7 +1355,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     )
                     return f"""
 <div style="border:1px solid #e5e7f0;border-radius:12px;padding:12px;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.03);margin-bottom:8px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
     <div style="font-weight:600;color:#0c0c1f;">{config.get('label')}</div>
     <div style="font-size:1.1rem;font-weight:700;color:#0c0863;">{formatter(val)}</div>
   </div>

@@ -729,6 +729,19 @@ def render_comparativo_tab(tab_container) -> None:
                 margin-top: 0 !important;
                 padding-top: 0 !important;
             }
+            @media (max-width: 900px) {
+                div[data-testid="stVegaLiteChart"] {
+                    height: 70vh !important;
+                    max-height: 70vh !important;
+                    padding-right: 0 !important;
+                }
+            }
+            @media (max-width: 600px) {
+                div[data-testid="stVegaLiteChart"] {
+                    height: 60vh !important;
+                    max-height: 60vh !important;
+                }
+            }
             </style>
             """,
             unsafe_allow_html=True,
@@ -796,7 +809,7 @@ def render_comparativo_tab(tab_container) -> None:
                 st.markdown(
                     f"""
                     <div style="border:1px solid #e5e7eb; border-radius:8px; padding:0.75rem;">
-                      <div style="display:flex; align-items:center; gap:0.5rem;">
+                      <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                         <span style="width:12px; height:12px; background:{color}; display:inline-block; border-radius:2px;"></span>
                         <strong style="font-size:1rem;">{label}</strong>
                       </div>
