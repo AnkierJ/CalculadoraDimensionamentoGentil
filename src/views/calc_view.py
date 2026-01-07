@@ -4,9 +4,11 @@
 import math
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
+from sklearn.cluster import KMeans
 
 from src.logic.core.logic import (
     DEFAULT_OCUPACAO_ALVO,
@@ -54,6 +56,86 @@ from src.logic.utils.helpers import (
 # =============================================================================
 # Render principal
 # =============================================================================
+SIMILARITY_FEATURES = [
+    "ReceitaTotalMes",
+    "BaseAtiva",
+    "Area Total",
+    "Faturamento/Hora",
+    "Pedidos/Dia",
+]
+
+
+def _select_similar_lojas(
+    train_df: pd.DataFrame,
+    target_features: Dict[str, object],
+    loja_nome: Optional[str],
+    target_aux_hist: Optional[float] = None,
+    n: int = 3,
+) -> pd.DataFrame:
+    if train_df is None or train_df.empty:
+        return pd.DataFrame()
+    feature_cols = [col for col in SIMILARITY_FEATURES if col in train_df.columns]
+    if not feature_cols:
+        return pd.DataFrame()
+    df_feat = train_df[feature_cols].apply(pd.to_numeric, errors="coerce")
+    medians = df_feat.median(skipna=True)
+    df_feat = df_feat.fillna(medians)
+    target_vals = []
+    for col in feature_cols:
+        val = safe_float(target_features.get(col), float("nan"))
+        if not math.isfinite(val):
+            val = float(medians.get(col, 0.0))
+        target_vals.append(val)
+    target_series = pd.Series(target_vals, index=feature_cols, dtype="float64")
+    means = df_feat.mean()
+    stds = df_feat.std().replace(0.0, 1.0)
+    df_scaled = (df_feat - means) / stds
+    target_scaled = ((target_series - means) / stds).to_numpy(dtype="float64")
+    aux_weight = 3.0
+    aux_series = pd.to_numeric(train_df.get("QtdAux"), errors="coerce")
+    aux_median = float(aux_series.median(skipna=True)) if aux_series is not None else 0.0
+    aux_series = aux_series.fillna(aux_median)
+    aux_mean = float(aux_series.mean()) if aux_series is not None else 0.0
+    aux_std = float(aux_series.std() or 1.0) if aux_series is not None else 1.0
+    aux_std = aux_std if aux_std != 0.0 else 1.0
+    aux_scaled = (aux_series - aux_mean) / aux_std
+    target_aux = target_aux_hist
+    if target_aux is None:
+        target_aux = safe_float(target_features.get("QtdAux"), float("nan"))
+    if not math.isfinite(target_aux):
+        target_aux = aux_median
+    target_aux_scaled = (float(target_aux) - aux_mean) / aux_std
+    cluster_mask = None
+    n_clusters = min(4, len(df_scaled))
+    if n_clusters >= 2:
+        try:
+            model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            labels = model.fit_predict(df_scaled)
+            cluster_label = int(model.predict([target_scaled])[0])
+            cluster_mask = labels == cluster_label
+        except Exception:
+            cluster_mask = None
+    if cluster_mask is not None:
+        df_candidates = train_df.loc[cluster_mask].copy()
+        df_scaled_candidates = df_scaled.loc[cluster_mask]
+        aux_scaled_candidates = aux_scaled.loc[cluster_mask]
+    else:
+        df_candidates = train_df.copy()
+        df_scaled_candidates = df_scaled
+        aux_scaled_candidates = aux_scaled
+    if loja_nome and "Loja" in df_candidates.columns:
+        df_candidates = df_candidates[df_candidates["Loja"].astype(str).str.strip().ne(loja_nome)]
+        df_scaled_candidates = df_scaled_candidates.loc[df_candidates.index]
+        aux_scaled_candidates = aux_scaled_candidates.loc[df_candidates.index]
+    if df_candidates.empty:
+        return pd.DataFrame()
+    diffs = df_scaled_candidates.to_numpy(dtype="float64") - target_scaled
+    dist_aux = aux_scaled_candidates.to_numpy(dtype="float64") - target_aux_scaled
+    dist = np.sqrt((diffs ** 2).sum(axis=1) + (aux_weight * dist_aux) ** 2)
+    df_candidates = df_candidates.assign(_sim_dist=dist)
+    return df_candidates.sort_values("_sim_dist").head(n)
+
+
 def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     """Renderiza a aba de cálculo até a preparação das features."""
     with tab_calc:
@@ -1259,6 +1341,14 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             pred_hist_int = int(round(pred_hist_raw))
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
+            receita_aux_hist = None
+            if receita_total_obs > 0 and pred_hist_raw > 0:
+                receita_aux_hist = receita_total_obs / pred_hist_raw
+            receita_aux_ideal = None
+            if receita_total > 0 and pred_ideal_raw > 0:
+                receita_aux_ideal = receita_total / pred_ideal_raw
+            receita_aux_hist_disp = f"R$ {receita_aux_hist:,.2f}" if receita_aux_hist else "-"
+            receita_aux_ideal_disp = f"R$ {receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
@@ -1266,6 +1356,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Histórico</div>"
                     f"<div style=\"font-size:1.5rem;font-weight:600;\">{pred_hist_int} auxiliares</div>"
                     f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_raw:.2f} aux</div>"
+                    f"<div style=\"font-size:0.9rem;font-weight:400;color:#6c6c6c;\">Faturamento/Qtd Aux: {receita_aux_hist_disp}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1282,6 +1373,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
                     f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} auxiliares</div>"
                     f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_raw:.2f} aux)</div>"
+                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>Faturamento/Qtd Aux: {receita_aux_ideal_disp}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1301,6 +1393,81 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+            similar_df = _select_similar_lojas(
+                train_df,
+                features_input_ideal_ml or features_input_ideal,
+                loja_nome_alvo_submit,
+                target_aux_hist=pred_hist_raw,
+                n=3,
+            )
+            if not similar_df.empty:
+                st.markdown("### Lojas parecidas com a loja calculada")
+
+                def _predict_ideal_for_row(row_dict: Dict[str, object]) -> Optional[float]:
+                    if model_bundle_ideal is None:
+                        return None
+                    resultados, _ = gerar_resultados_modelos(
+                        model_bundle_ideal,
+                        train_df,
+                        row_dict,
+                        "ideal",
+                        horas_disp,
+                        margem,
+                        algo_order=["catboost"],
+                        anchor_quantile=anchor_quantile,
+                        apply_cluster_blend=False,
+                        compute_metrics=False,
+                        skip_cap_cols=skip_cap_cols_ideal,
+                    )
+                    if not resultados:
+                        return None
+                    pred_val = None
+                    for res in resultados:
+                        if res.get("key") == "catboost":
+                            pred_val = res.get("pred")
+                            break
+                    if pred_val is None:
+                        pred_val = resultados[0].get("pred")
+                    try:
+                        pred_float = float(pred_val)
+                    except Exception:
+                        return None
+                    return pred_float if math.isfinite(pred_float) else None
+
+                sim_cols = st.columns(3)
+                for idx, (_, row) in enumerate(similar_df.iterrows()):
+                    if idx >= len(sim_cols):
+                        break
+                    with sim_cols[idx]:
+                        loja_label = str(row.get("Loja", f"Loja {idx + 1}")).strip() or f"Loja {idx + 1}"
+                        qtd_aux_hist = safe_float(row.get("QtdAux"), float("nan"))
+                        qtd_aux_hist_int = int(round(qtd_aux_hist)) if math.isfinite(qtd_aux_hist) else None
+                        ideal_pred = _predict_ideal_for_row(row.to_dict())
+                        ideal_pred_int = int(round(ideal_pred)) if ideal_pred is not None else None
+                        diff_calc = ideal_pred - qtd_aux_hist if ideal_pred is not None and math.isfinite(qtd_aux_hist) else None
+                        diff_disp = f"{diff_calc:+.2f}" if diff_calc is not None and math.isfinite(diff_calc) else "-"
+                        receita_total_loja = safe_float(row.get("ReceitaTotalMes"), float("nan"))
+                        receita_por_aux = None
+                        if math.isfinite(receita_total_loja) and math.isfinite(qtd_aux_hist) and qtd_aux_hist > 0:
+                            receita_por_aux = receita_total_loja / qtd_aux_hist
+                        receita_aux_disp = (
+                            f"R$ {receita_por_aux:,.2f}"
+                            if receita_por_aux is not None and math.isfinite(receita_por_aux)
+                            else "-"
+                        )
+                        hist_disp = f"{qtd_aux_hist_int}" if qtd_aux_hist_int is not None else "-"
+                        ideal_disp = f"{ideal_pred_int}" if ideal_pred_int is not None else "-"
+                        st.markdown(
+                            "<div style='border:1px solid #e5e7f0;border-radius:12px;padding:12px;background:#fff;'>"
+                            f"<div style='font-weight:600;margin-bottom:6px;color:#0c0c1f;'>{loja_label}</div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Qtd Aux Historico: <b>{hist_disp}</b></div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Qtd Aux Ideal: <b>{ideal_disp}</b></div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Diferenca: <b>{diff_disp}</b></div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Faturamento/Qtd Aux Real: <b>{receita_aux_disp}</b></div>"
+                            "</div>"
+                            ,
+                            unsafe_allow_html=True,
+                        )
             if mostrar_metricas:
                 metrics_info_ideal = cat_ideal.get("metrics") or {}
 
@@ -1440,7 +1607,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         metric_cards.append(card_html)
 
                 if metric_cards:
-                    st.markdown("**Qualidade do modelo (ideal)**")
+                    st.markdown("### Qualidade do modelo (ideal)")
                     st.caption("Faixas referenciais para previsao de headcount; a seta mostra onde o modelo atual está em cada indicador.")
                     for idx in range(0, len(metric_cards), 2):
                         cols = st.columns(2)
