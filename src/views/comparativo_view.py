@@ -18,7 +18,13 @@ from src.logic.core.logic import (
     _preds_for_loja,
 )
 from src.logic.data.buscaDeLojas import _get_loja_row, _ensure_loja_key
-from src.logic.utils.helpers import safe_float
+from src.logic.utils.helpers import (
+    safe_float,
+    get_criterio_mapeado_key,
+    get_criterio_mapeado_label,
+    get_criterio_mapeado_options,
+    MAPEADO_HELPER_TEXT,
+)
 
 # =============================================================================
 # Render
@@ -144,6 +150,21 @@ def render_comparativo_tab(tab_container) -> None:
         # =============================================================================
         # Parametros do comparativo
         # =============================================================================
+        criterio_options = get_criterio_mapeado_options()
+        criterio_default = get_criterio_mapeado_label()
+        criterio_index = criterio_options.index(criterio_default) if criterio_default in criterio_options else 0
+        criterio_label = st.selectbox(
+            "Criterio de referencia para faturamento mapeado",
+            options=criterio_options,
+            index=criterio_index,
+            key="criterio_mapeado_label_comp",
+            help=MAPEADO_HELPER_TEXT,
+        )
+        st.session_state["criterio_mapeado_label"] = criterio_label
+        criterio_key = get_criterio_mapeado_key()
+        ratio_col = f"{criterio_label} Real"
+        ratio_col_fmt = f"{criterio_label} Real"
+
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
             anchor_options = [50 + (2.5 * i) for i in range(17)]
@@ -156,10 +177,13 @@ def render_comparativo_tab(tab_container) -> None:
                 raw_anchor = min(anchor_options, key=lambda v: abs(v - raw_anchor))
 
             anchor_percent = st.select_slider(
-                "Âncora receita/aux (%)",
+                f"Âncora {criterio_label} (%)",
                 options=anchor_options,
                 value=raw_anchor,
-                help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, percentil mais alto.",
+                help=(
+                    f"Percentil de {criterio_label} usado como referência: se a meta é evitar falta de gente, "
+                    "prefira percentil mais baixo; se a meta é eficiência agressiva, percentil mais alto."
+                ),
             )
             st.session_state["anchor_rpa_percent"] = anchor_percent
             anchor_quantile = float(anchor_percent) / 100.0
@@ -252,7 +276,8 @@ def render_comparativo_tab(tab_container) -> None:
             st.warning("Selecione ao menos uma loja para continuar.")
             return
 
-        cache_ver = 9 + int(anchor_quantile * 100)
+        criterio_cache_bump = 1000 if criterio_key == "SalarioMapeado" else 0
+        cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_hist = _train_cached(
             train_df,
             "historico",
@@ -299,7 +324,9 @@ def render_comparativo_tab(tab_container) -> None:
             if pessoas_norm is not None and not pessoas_norm.empty:
                 pessoas_row, _ = _get_loja_row(pessoas_norm, loja_nome)
                 if pessoas_row:
-                    qtd_aux_real = safe_float(pessoas_row.get("QtdAux"))
+                    qtd_aux_real = safe_float(pessoas_row.get("TotalMapeado"), float("nan"))
+                    if not math.isfinite(qtd_aux_real) or qtd_aux_real <= 0:
+                        qtd_aux_real = safe_float(pessoas_row.get("QtdAux"), float("nan"))
             porte_label, porte_info = _classificar_porte(feature_row)
 
             praca_val = None
@@ -318,9 +345,16 @@ def render_comparativo_tab(tab_container) -> None:
             qtd_ideal_i = _round_int(qtd_ideal)
 
             receita = safe_float(feature_row.get("ReceitaTotalMes"))
-            receita_por_aux_real = None
-            if receita and qtd_aux_real_i and qtd_aux_real_i > 0:
-                receita_por_aux_real = receita / qtd_aux_real_i
+            criterio_denom = None
+            if pessoas_row:
+                criterio_denom = safe_float(pessoas_row.get(criterio_key), float("nan"))
+                if criterio_key == "SalarioMapeado" and (not math.isfinite(criterio_denom) or criterio_denom <= 0):
+                    criterio_denom = safe_float(pessoas_row.get("TotalMapeado"), float("nan"))
+            if criterio_denom is None or not math.isfinite(criterio_denom) or criterio_denom <= 0:
+                criterio_denom = qtd_aux_real_i
+            receita_por_criterio_real = None
+            if receita and criterio_denom and criterio_denom > 0:
+                receita_por_criterio_real = receita / criterio_denom
 
             delta_ideal = None
             if qtd_ideal_i is not None and qtd_hist_i is not None:
@@ -328,11 +362,11 @@ def render_comparativo_tab(tab_container) -> None:
             linhas_comp.append(
                 {
                     "Loja": loja_display,
-                    "Qtd Aux Real": qtd_aux_real_i,
-                    "Qtd Aux Historico": qtd_hist_i,
-                    "Qtd Aux Ideal": qtd_ideal_i,
+                    "Time Comercial Real": qtd_aux_real_i,
+                    "Time Comercial Historico": qtd_hist_i,
+                    "Time Comercial Ideal": qtd_ideal_i,
                     "Diferença": delta_ideal,
-                    "Faturamento/Qtd Aux Real": receita_por_aux_real,
+                    ratio_col: receita_por_criterio_real,
                     "Porte": porte_label,
                     "Cluster Porte": porte_info.get("porte_code") if porte_info else None,
                     "Praca": praca_val,
@@ -394,6 +428,16 @@ def render_comparativo_tab(tab_container) -> None:
             formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
             return f"R$ {formatted}"
 
+        def _format_ratio(val: Optional[float]) -> str:
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return ""
+            try:
+                num = float(val)
+            except Exception:
+                return ""
+            formatted = f"{num:,.2f}"
+            return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
         def _expand_axis(min_val: float, max_val: float) -> tuple[float, float]:
             if min_val == max_val:
                 min_val -= 1
@@ -404,12 +448,12 @@ def render_comparativo_tab(tab_container) -> None:
 
         colunas_saida = [
             "Loja",
-            "Qtd Aux Real",
-            "Qtd Aux Historico",
-            "Qtd Aux Ideal",
+            "Time Comercial Real",
+            "Time Comercial Historico",
+            "Time Comercial Ideal",
             "Diferença",
             "Urgência",
-            "Faturamento/Qtd Aux Real",
+            ratio_col,
             "Cluster Porte",
         ]
         st.markdown(
@@ -441,7 +485,7 @@ def render_comparativo_tab(tab_container) -> None:
                     urg_label = subset_exibir["Diferença"].apply(_delta_urgency_label)
                     subset_exibir["Urgência"] = urg_label.apply(lambda v: f"• {v}" if v else "")
                     styled = subset_exibir.style.format(
-                        {"Faturamento/Qtd Aux Real": _format_brl},
+                        {ratio_col: _format_ratio if criterio_key == "SalarioMapeado" else _format_brl},
                     )
                     styled = styled.applymap(
                         lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
@@ -450,37 +494,37 @@ def render_comparativo_tab(tab_container) -> None:
                     st.dataframe(styled, use_container_width=True)
                 else:
                     styled = subset_exibir.style.format(
-                        {"Faturamento/Qtd Aux Real": _format_brl},
+                        {ratio_col: _format_ratio if criterio_key == "SalarioMapeado" else _format_brl},
                     )
                     st.dataframe(styled, use_container_width=True)
 
         # =============================================================================
         # Grafico de dimensionamento
         # =============================================================================
-        st.subheader("Grafico de Dimensionamento (Qtd Aux Real vs Ideal)")
+        st.subheader("Grafico de Dimensionamento (Time Comercial Real vs Ideal)")
 
         pontos_df = tabela_comp.copy()
-        pontos_df["Qtd Aux Real Plot"] = pd.to_numeric(
-            pontos_df["Qtd Aux Real"], errors="coerce"
-        ).fillna(pd.to_numeric(pontos_df["Qtd Aux Historico"], errors="coerce"))
-        pontos_df["Qtd Aux Ideal Plot"] = pd.to_numeric(
-            pontos_df["Qtd Aux Ideal"], errors="coerce"
+        pontos_df["Time Comercial Real Plot"] = pd.to_numeric(
+            pontos_df["Time Comercial Real"], errors="coerce"
+        ).fillna(pd.to_numeric(pontos_df["Time Comercial Historico"], errors="coerce"))
+        pontos_df["Time Comercial Ideal Plot"] = pd.to_numeric(
+            pontos_df["Time Comercial Ideal"], errors="coerce"
         )
-        pontos_df["Faturamento/Qtd Aux Real (R$)"] = pontos_df[
-            "Faturamento/Qtd Aux Real"
-        ].apply(_format_brl)
+        pontos_df[ratio_col_fmt] = pontos_df[ratio_col].apply(
+            _format_ratio if criterio_key == "SalarioMapeado" else _format_brl
+        )
         pontos_df["Praca"] = pontos_df["Praca"].fillna("").astype(str)
-        pontos_df = pontos_df.dropna(subset=["Qtd Aux Real Plot", "Qtd Aux Ideal Plot"])
+        pontos_df = pontos_df.dropna(subset=["Time Comercial Real Plot", "Time Comercial Ideal Plot"])
 
         if pontos_df.empty:
             st.info("Sem pontos validos para o grafico de comparativo.")
             return
 
-        hist_vals = pd.to_numeric(pontos_df["Qtd Aux Historico"], errors="coerce")
-        ideal_vals = pd.to_numeric(pontos_df["Qtd Aux Ideal"], errors="coerce")
+        hist_vals = pd.to_numeric(pontos_df["Time Comercial Historico"], errors="coerce")
+        ideal_vals = pd.to_numeric(pontos_df["Time Comercial Ideal"], errors="coerce")
         max_val = max(float(hist_vals.max(skipna=True)), float(ideal_vals.max(skipna=True)))
         if not math.isfinite(max_val):
-            alt_max = pd.to_numeric(pontos_df["Qtd Aux Ideal Plot"], errors="coerce").max(skipna=True)
+            alt_max = pd.to_numeric(pontos_df["Time Comercial Ideal Plot"], errors="coerce").max(skipna=True)
             max_val = float(alt_max) if pd.notna(alt_max) else 0.0
         step = 5
         upper = max(step, int(math.ceil(max_val / step) * step))
@@ -647,11 +691,11 @@ def render_comparativo_tab(tab_container) -> None:
             "mark": {"type": "point", "filled": True, "size": 80, "color": "#1f2933"},
             "encoding": {
                 "x": {
-                    "field": "Qtd Aux Ideal Plot",
+                    "field": "Time Comercial Ideal Plot",
                     "type": "quantitative",
                     "scale": {"domain": [x_min, x_max]},
                     "axis": {
-                        "title": "Qtd Aux Ideal",
+                        "title": "Time Comercial Ideal",
                         "tickMinStep": 5,
                         "values": tick_values,
                         "format": ".0f",
@@ -659,11 +703,11 @@ def render_comparativo_tab(tab_container) -> None:
                     },
                 },
                 "y": {
-                    "field": "Qtd Aux Real Plot",
+                    "field": "Time Comercial Real Plot",
                     "type": "quantitative",
                     "scale": {"domain": [y_min, y_max]},
                     "axis": {
-                        "title": "Qtd Aux Real",
+                        "title": "Time Comercial Real",
                         "tickMinStep": 5,
                         "values": tick_values,
                         "format": ".0f",
@@ -674,19 +718,19 @@ def render_comparativo_tab(tab_container) -> None:
                     {"field": "Loja", "type": "nominal", "title": "Loja"},
                     {"field": "Praca", "type": "nominal", "title": "Praca"},
                     {
-                        "field": "Qtd Aux Historico",
+                        "field": "Time Comercial Historico",
                         "type": "quantitative",
-                        "title": "Qtd Aux Historico",
+                        "title": "Time Comercial Historico",
                     },
                     {
-                        "field": "Qtd Aux Ideal",
+                        "field": "Time Comercial Ideal",
                         "type": "quantitative",
-                        "title": "Qtd Aux Ideal",
+                        "title": "Time Comercial Ideal",
                     },
                     {
-                        "field": "Faturamento/Qtd Aux Real (R$)",
+                        "field": ratio_col_fmt,
                         "type": "nominal",
-                        "title": "Faturamento/Aux Real",
+                        "title": ratio_col,
                     },
                 ],
             },
@@ -831,7 +875,7 @@ def render_comparativo_tab(tab_container) -> None:
             bucket_df = resumo_df.loc[resumo_df["Dimensionamento"] == bucket].copy()
             total_diff = bucket_df["Diferença_num"].dropna().sum()
             lojas_list = bucket_df[
-                ["Loja", "Urgencia_color", "Qtd Aux Ideal", "Qtd Aux Historico"]
+                ["Loja", "Urgencia_color", "Time Comercial Ideal", "Time Comercial Historico"]
             ].dropna(subset=["Loja"]).values.tolist()
             bullets = "".join(
                 f"<li style='margin-bottom:0.25rem; list-style:none;'>"

@@ -46,6 +46,7 @@ from ..utils.helpers import (
     get_schema_dPessoas,
     get_schema_fFaturamento2,
     get_schema_fIndicadores,
+    get_criterio_mapeado_key,
     image_to_base64,
     normalize_processo_nome,
     read_csv_with_schema,
@@ -431,7 +432,14 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         df["HorasOperacionais"] = df.apply(_horas_op, axis=1)
     # target
     merge_key = key_col if key_col in dPessoas.columns else "Loja"
-    df = pd.merge(df, dPessoas[[merge_key,"QtdAux"]], left_on=key_col, right_on=merge_key, how="inner")
+    pessoas_cols = [merge_key, "QtdAux"]
+    for extra_col in ["TotalMapeado", "SalarioMapeado"]:
+        if extra_col in dPessoas.columns:
+            pessoas_cols.append(extra_col)
+    df = pd.merge(df, dPessoas[pessoas_cols], left_on=key_col, right_on=merge_key, how="inner")
+    if "TotalMapeado" in df.columns:
+        total_map = pd.to_numeric(df["TotalMapeado"], errors="coerce")
+        df["QtdAux"] = total_map.where(total_map.notna() & (total_map > 0), df.get("QtdAux"))
     # indicadores (agregar por loja)
     if fIndicadores is not None and not fIndicadores.empty:
         ind_keep = [
@@ -468,6 +476,8 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         "I4aI6",
         "AtividadeER",
         "ReceitaPorAux",
+        "TotalMapeado",
+        "SalarioMapeado",
     ]
     for extra_col in extra_numeric:
         if extra_col in df.columns:
@@ -595,7 +605,8 @@ def _get_high_perf_anchor(train_df: pd.DataFrame, q: float = 0.75) -> Optional[f
     Retorna um valor de referência (percentil superior) de Receita por Auxiliar.
     Usado para ancorar o alvo "ideal" nas lojas com melhor desempenho.
     """
-    rec_por_aux = _compute_receita_por_aux(train_df, train_df.get("QtdAux"))
+    base_col = "TotalMapeado" if "TotalMapeado" in train_df.columns else "QtdAux"
+    rec_por_aux = _compute_receita_por_aux(train_df, train_df.get(base_col))
     rec_valid = rec_por_aux.dropna()
     rec_valid = rec_valid[rec_valid > 0]
     if rec_valid.empty:
@@ -624,7 +635,20 @@ def _apply_high_perf_cap(
     receita = pd.to_numeric(train_df.get("ReceitaTotalMes"), errors="coerce")
     if receita is None or receita.empty:
         return y_series
-    cap = (receita / anchor) * (1.0 + margem)
+    criterio_key = get_criterio_mapeado_key()
+    if criterio_key == "SalarioMapeado":
+        salario_map = pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce")
+        if not isinstance(salario_map, pd.Series):
+            salario_map = pd.Series(salario_map, index=train_df.index, dtype="float64")
+        total_map = pd.to_numeric(train_df.get("TotalMapeado"), errors="coerce")
+        if not isinstance(total_map, pd.Series):
+            total_map = pd.Series(total_map, index=train_df.index, dtype="float64")
+        salario_por_pessoa = salario_map / total_map.replace(0, np.nan)
+        salario_por_pessoa = salario_por_pessoa.replace([np.inf, -np.inf], np.nan)
+        salario_ideal = (receita / anchor) * (1.0 + margem)
+        cap = salario_ideal / salario_por_pessoa.replace(0, np.nan)
+    else:
+        cap = (receita / anchor) * (1.0 + margem)
     cap = cap.replace([np.inf, -np.inf], np.nan)
     capped = y_series.copy()
     cap_aligned = cap.reindex(y_series.index)
@@ -952,7 +976,8 @@ def make_target(
     - historico: usa QtdAux da base (padrão atual da empresa)
     - ideal: usa carga teórica / horas_disp, com fallback para QtdAux se não houver carga
     """
-    y_hist = pd.to_numeric(train_df["QtdAux"], errors="coerce")
+    base_col = "TotalMapeado" if "TotalMapeado" in train_df.columns else "QtdAux"
+    y_hist = pd.to_numeric(train_df.get(base_col), errors="coerce")
     if mode == "historico":
         return y_hist
     # mode == "ideal"
@@ -1001,7 +1026,21 @@ def make_target(
         anchor_rpa = 1.0
 
     # Headcount ideal = receita esperada / receita por aux de referência
-    y_ideal = receita_base / max(anchor_rpa, 1e-6)
+    criterio_key = get_criterio_mapeado_key()
+    if criterio_key == "SalarioMapeado":
+        salario_map = pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce")
+        if not isinstance(salario_map, pd.Series):
+            salario_map = pd.Series(salario_map, index=train_df.index, dtype="float64")
+        total_map = pd.to_numeric(train_df.get("TotalMapeado"), errors="coerce")
+        if not isinstance(total_map, pd.Series):
+            total_map = pd.Series(total_map, index=train_df.index, dtype="float64")
+        salario_por_pessoa = salario_map / total_map.replace(0, np.nan)
+        salario_por_pessoa = salario_por_pessoa.replace([np.inf, -np.inf], np.nan)
+        salario_ideal = receita_base / max(anchor_rpa, 1e-6)
+        y_ideal = salario_ideal / salario_por_pessoa.replace(0, np.nan)
+        y_ideal = y_ideal.fillna(y_hist)
+    else:
+        y_ideal = receita_base / max(anchor_rpa, 1e-6)
     y_ideal = y_ideal * (1.0 + margem)
     # Se faltar receita, preenche com mediana do próprio alvo ideal (evita usar QtdAux individual)
     mediana_ideal = float(y_ideal.median(skipna=True)) if y_ideal.notna().any() else float(y_hist.median(skipna=True))
@@ -1033,6 +1072,53 @@ def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.S
             fator_tempo = horas.fillna(1.0)
         base = (faturamento_hora * fator_tempo) / qaux
     return base.replace([np.inf, -np.inf], np.nan)
+
+def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.Series:
+    """Retorna serie com receita (mes ou hora) dividida pelo criterio selecionado."""
+    if train_df is None or train_df.empty:
+        return pd.Series(dtype="float64")
+    def _ensure_series(values) -> pd.Series:
+        if isinstance(values, pd.Series):
+            return values
+        return pd.Series(values, index=train_df.index, dtype="float64")
+
+    criterio_key = get_criterio_mapeado_key()
+    receita_mes_raw = train_df.get("ReceitaTotalMes")
+    receita_mes = _ensure_series(pd.to_numeric(receita_mes_raw, errors="coerce"))
+    receita_base = receita_mes.copy()
+    if receita_base.notna().sum() < 3 and "Faturamento/Hora" in train_df.columns:
+        faturamento_hora = _ensure_series(pd.to_numeric(train_df["Faturamento/Hora"], errors="coerce"))
+        horas_raw = train_df.get("HorasOperacionais")
+        if horas_raw is None:
+            horas = pd.Series(1.0, index=train_df.index, dtype="float64")
+        else:
+            horas = _ensure_series(pd.to_numeric(horas_raw, errors="coerce"))
+            horas = horas.where(horas > 0, np.nan).fillna(1.0)
+        receita_base = faturamento_hora * horas * WEEKS_PER_MONTH
+
+    if criterio_key == "SalarioMapeado":
+        salario_map = _ensure_series(pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce"))
+        denom = salario_map.replace(0, np.nan)
+    elif criterio_key == "TotalMapeado":
+        total_map = _ensure_series(pd.to_numeric(train_df.get("TotalMapeado"), errors="coerce"))
+        denom = total_map.replace(0, np.nan)
+    elif criterio_key in train_df.columns:
+        denom = _ensure_series(pd.to_numeric(train_df[criterio_key], errors="coerce")).replace(0, np.nan)
+    else:
+        denom = None
+
+    if denom is not None:
+        base = receita_base / denom
+        base = base.replace([np.inf, -np.inf], np.nan)
+        if base.notna().sum() >= 3:
+            return base
+
+    if qtd_aux is None:
+        return pd.Series(dtype="float64")
+    qaux = pd.to_numeric(qtd_aux, errors="coerce").replace(0, np.nan)
+    base = receita_base / qaux
+    return base.replace([np.inf, -np.inf], np.nan)
+
 def predict_qtd_auxiliares(
     model: Pipeline,
     feature_row: Dict[str, object],
@@ -1533,12 +1619,14 @@ def _blend_pred_with_cluster(
         cluster_pred = global_median
     if cluster_pred is None or not math.isfinite(cluster_pred):
         return float(pred_val), 0.0
+    criterio_key = get_criterio_mapeado_key()
+    blend_scale = 1.0 if criterio_key == "SalarioMapeado" else 0.35
     peso = 0.35
     if is_large:
         peso = 0.60
     if cluster_size and cluster_size <= 2:
         peso *= 0.6
-    peso = max(0.0, min(0.8, float(peso)))
+    peso = max(0.0, min(0.8, float(peso))) * blend_scale
     ajust = (float(pred_val) * (1.0 - peso)) + (float(cluster_pred) * peso)
     return ajust, peso
 def _apply_cluster_blend(
@@ -1960,6 +2048,18 @@ ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
         "DiasOperacionais/Mês": "DiasOperacionaisMes",
         "DiasOperacionais/Mes": "DiasOperacionaisMes",
     },
+    "dPessoas": {
+        "TOTALMAP": "TotalMapeado",
+        "TotalMap": "TotalMapeado",
+        "Total Map": "TotalMapeado",
+        "Total Mapeado": "TotalMapeado",
+        "SALARIOMAP/MES": "SalarioMapeado",
+        "SALARIOMAP/MÊS": "SalarioMapeado",
+        "SALARIOMAP/MÒS": "SalarioMapeado",
+        "SalarioMap/Mes": "SalarioMapeado",
+        "Salario Map/Mes": "SalarioMapeado",
+        "Salario Mapeado": "SalarioMapeado",
+    },
 }
 @st.cache_data(show_spinner=False)    
 def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.DataFrame:
@@ -2021,7 +2121,7 @@ def render_append(nome: str, schema_fn, subset_cols):
         ok, errs = validate_df(df_up, schema)
         if ok:
             st.session_state[nome] = append_and_dedup(st.session_state[nome], df_up, subset_cols)
-            if nome == "fIndicadores":
+            if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
             st.success(f"{nome} atualizado. Linhas totais: {len(st.session_state[nome])}")
         else:

@@ -21,6 +21,16 @@ SYN = {
     "BaseTotal": ["BaseTotal", "Base Total", "Base_Total", "Base"],
     "BaseAtiva": ["BaseAtiva", "Base Ativa", "Base_Ativa"],
     "ReceitaTotalMes": ["ReceitaTotalMes", "Receita Total", "Receita Total Mes", "Receita_Total_Mes"],
+    "TotalMapeado": ["TotalMapeado", "TOTALMAP", "TOTAL MAP", "TotalMap", "Total Map", "Total Mapeado"],
+    "SalarioMapeado": [
+        "SalarioMapeado",
+        "SALARIOMAP/MES",
+        "SALARIOMAP/MÊS",
+        "SALARIOMAP/MÒS",
+        "SalarioMap/Mes",
+        "Salario Map/Mes",
+        "Salario Mapeado",
+    ],
     "ReaisPorAtivo": ["ReaisPorAtivo", "Reais por Ativo", "Boleto MǸdio", "Boleto Medio", "Boleto_Medio"],
     "AtividadeER": ["AtividadeER", "Atividade ER", "Atividade_ER"],
     # Churn mantido apenas para compatibilidade de leitura; não mais usado no modelo
@@ -57,6 +67,38 @@ SYN = {
 
 TRUE_BOOL_VALUES = {"VERDADEIRO", "SIM", "S", "TRUE", "T", "1", "YES", "Y"}
 FALSE_BOOL_VALUES = {"FALSO", "NAO", "NǟO", "N", "FALSE", "F", "0", "NO"}
+
+
+CRITERIO_MAPEADO_DEFAULT = "TotalMapeado"
+CRITERIO_MAPEADO_OPTIONS = {
+    "Faturamento/TotalMapeado": "TotalMapeado",
+    "Faturamento/SalarioMapeado": "SalarioMapeado",
+}
+MAPEADO_HELPER_TEXT = (
+    "Mapeado abrange os cargos de auxiliares, lideres, caixas, "
+    "estagiarios&aprendizes, ASG e consultores de negocios."
+)
+
+
+def get_criterio_mapeado_options() -> List[str]:
+    return list(CRITERIO_MAPEADO_OPTIONS.keys())
+
+
+def get_criterio_mapeado_key() -> str:
+    raw = st.session_state.get("criterio_mapeado_key") or st.session_state.get("criterio_mapeado_label")
+    if raw in CRITERIO_MAPEADO_OPTIONS:
+        return CRITERIO_MAPEADO_OPTIONS[raw]
+    if raw in CRITERIO_MAPEADO_OPTIONS.values():
+        return raw
+    return CRITERIO_MAPEADO_DEFAULT
+
+
+def get_criterio_mapeado_label(key: Optional[str] = None) -> str:
+    criterio_key = key or get_criterio_mapeado_key()
+    for label, mapped_key in CRITERIO_MAPEADO_OPTIONS.items():
+        if mapped_key == criterio_key:
+            return label
+    return "Faturamento/TotalMapeado"
 
 
 # =============================================================================
@@ -221,6 +263,8 @@ def get_schema_dPessoas() -> Dict[str, str]:
         "Loja": "string",
         "QtdAux": "int",
         "QtdLid": "int",
+        "TotalMapeado": "float",
+        "SalarioMapeado": "float",
         "%disp": "float",
         "%absent": "float",
     }

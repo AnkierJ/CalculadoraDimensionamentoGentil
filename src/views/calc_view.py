@@ -46,6 +46,10 @@ from src.logic.models.model_catboost import get_catboost_feature_importance
 from src.logic.utils.helpers import (
     _norm_code,
     _standardize_row,
+    get_criterio_mapeado_key,
+    get_criterio_mapeado_label,
+    get_criterio_mapeado_options,
+    MAPEADO_HELPER_TEXT,
     get_lookup,
     get_lookup_value,
     normalize_processo_nome,
@@ -63,6 +67,52 @@ SIMILARITY_FEATURES = [
     "Faturamento/Hora",
     "Pedidos/Dia",
 ]
+
+
+def _delta_urgency_label(delta_val: Optional[float]) -> str:
+    if delta_val is None or (isinstance(delta_val, float) and pd.isna(delta_val)):
+        return ""
+    try:
+        diff = int(round(float(delta_val)))
+    except Exception:
+        return ""
+    abs_diff = abs(diff)
+    if abs_diff <= 1:
+        label = "Otimo"
+    elif abs_diff <= 4:
+        label = "Bom"
+    elif abs_diff <= 9:
+        label = "Atencao"
+    else:
+        label = "Alto"
+    return label
+
+
+def _delta_urgency_color(label_text: str) -> str:
+    if not isinstance(label_text, str) or not label_text:
+        return "#d1d5db"
+    label_norm = label_text.strip().lower()
+    if "otimo" in label_norm:
+        color = "#2c9a6c"
+    elif "bom" in label_norm:
+        color = "#4da3f5"
+    elif "atencao" in label_norm:
+        color = "#f0b429"
+    else:
+        color = "#d8516d"
+    return color
+
+
+def _render_urgency_badge(delta_val: Optional[float]) -> str:
+    label = _delta_urgency_label(delta_val)
+    if not label:
+        return ""
+    color = _delta_urgency_color(label)
+    return (
+        "<div style='margin-top:4px;font-size:0.85rem;color:#6c6c6c;'>"
+        f"<span style='background:{color}22;color:{color};padding:2px 8px;"
+        "border-radius:999px;font-weight:700;'>" + label + "</span></div>"
+    )
 
 
 def _select_similar_lojas(
@@ -1025,6 +1075,19 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.session_state["sim_processos_freq"] = updated_freqs
                 st.session_state["sim_processos_auto_freq"] = auto_freqs
  
+            criterio_options = get_criterio_mapeado_options()
+            criterio_default = get_criterio_mapeado_label()
+            criterio_index = criterio_options.index(criterio_default) if criterio_default in criterio_options else 0
+            criterio_label = st.selectbox(
+                "Criterio de referencia para faturamento mapeado",
+                options=criterio_options,
+                index=criterio_index,
+                key="criterio_mapeado_label_calc",
+                help=MAPEADO_HELPER_TEXT,
+            )
+            st.session_state["criterio_mapeado_label"] = criterio_label
+            criterio_key = get_criterio_mapeado_key()
+
             mostrar_metricas = False
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
@@ -1051,13 +1114,16 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
                     anchor_percent = st.select_slider(
 
-                        "Âncora receita/aux (%)",
+                        f"Âncora {criterio_label} (%)",
 
                         options=anchor_options,
 
                         value=raw_anchor,
 
-                        help="Percentil de receita por auxiliar usado como referência: se a meta é evitar falta de gente, prefira percentil mais baixo; se a meta é eficiência agressiva, prefira percentil mais alto.",
+                        help=(
+                            f"Percentil de {criterio_label} usado como referência: se a meta é evitar falta de gente, "
+                            "prefira percentil mais baixo; se a meta é eficiência agressiva, prefira percentil mais alto."
+                        ),
 
                     )
 
@@ -1068,7 +1134,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         with col3:
             st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
             submitted = st.form_submit_button(
-                "Calcular Qtd Auxiliares",
+                "Calcular Time Comercial",
                     type="primary",
                     use_container_width=True,
                 )
@@ -1114,7 +1180,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     model_bundle_hist = None
     model_bundle_ideal = None
     if modo_ml:
-        cache_ver = 9 + int(anchor_quantile * 100)
+        criterio_cache_bump = 1000 if criterio_key == "SalarioMapeado" else 0
+        cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_bundle_hist = _train_cached(
             train_df,
             "historico",
@@ -1341,22 +1408,38 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             pred_hist_int = int(round(pred_hist_raw))
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
+            criterio_row = st.session_state.get("lookup_row") or {}
+            if criterio_key == "TotalMapeado":
+                criterio_denom_hist = pred_hist_raw
+                criterio_denom_ideal = pred_ideal_raw
+            else:
+                criterio_denom_hist = safe_float(criterio_row.get(criterio_key), float("nan"))
+                if not math.isfinite(criterio_denom_hist) or criterio_denom_hist <= 0:
+                    criterio_denom_hist = pred_hist_raw
+                criterio_denom_ideal = safe_float(criterio_row.get(criterio_key), float("nan"))
+                if not math.isfinite(criterio_denom_ideal) or criterio_denom_ideal <= 0:
+                    criterio_denom_ideal = pred_ideal_raw
             receita_aux_hist = None
-            if receita_total_obs > 0 and pred_hist_raw > 0:
-                receita_aux_hist = receita_total_obs / pred_hist_raw
+            if receita_total_obs > 0 and criterio_denom_hist > 0:
+                receita_aux_hist = receita_total_obs / criterio_denom_hist
             receita_aux_ideal = None
-            if receita_total > 0 and pred_ideal_raw > 0:
-                receita_aux_ideal = receita_total / pred_ideal_raw
-            receita_aux_hist_disp = f"R$ {receita_aux_hist:,.2f}" if receita_aux_hist else "-"
-            receita_aux_ideal_disp = f"R$ {receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
+            if receita_total > 0 and criterio_denom_ideal > 0:
+                receita_aux_ideal = receita_total / criterio_denom_ideal
+            if criterio_key == "SalarioMapeado":
+                receita_aux_hist_disp = f"{receita_aux_hist:,.2f}" if receita_aux_hist else "-"
+                receita_aux_ideal_disp = f"{receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
+            else:
+                receita_aux_hist_disp = f"R$ {receita_aux_hist:,.2f}" if receita_aux_hist else "-"
+                receita_aux_ideal_disp = f"R$ {receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
+            urgency_badge = _render_urgency_badge(diff_val)
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
-                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Histórico</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{pred_hist_int} auxiliares</div>"
-                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_raw:.2f} aux</div>"
-                    f"<div style=\"font-size:0.9rem;font-weight:400;color:#6c6c6c;\">Faturamento/Qtd Aux: {receita_aux_hist_disp}</div>"
+                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Time Comercial Historico</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{pred_hist_int} colaboradores</div>"
+                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{pred_hist_raw:.2f} colab.</div>"
+                    f"<div style=\"font-size:0.9rem;font-weight:400;color:#6c6c6c;\">{criterio_label}: {receita_aux_hist_disp}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1370,10 +1453,10 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             with col_res[1]:
                 st.markdown(
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
-                    f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
-                    f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} auxiliares</div>"
-                    f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_raw:.2f} aux)</div>"
-                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>Faturamento/Qtd Aux: {receita_aux_ideal_disp}</div>"
+                    f"<div style='font-size:1.3rem;font-weight:600;'>Time Comercial Ideal</div>"
+                    f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} colaboradores</div>"
+                    f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_raw:.2f} colab.)</div>"
+                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>{criterio_label}: {receita_aux_ideal_disp}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1388,8 +1471,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - hist)</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{int(round(diff_val)):+d} auxiliares</div>"
-                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{diff_val:+.2f} aux</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:600;\">{int(round(diff_val)):+d} colaboradores</div>"
+                    f"<div style=\"font-size:0.95rem;font-weight:400;color:#6c6c6c;\">{diff_val:+.2f} colab.</div>"
+                    f"{urgency_badge}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1446,24 +1530,40 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         ideal_pred_int = int(round(ideal_pred)) if ideal_pred is not None else None
                         diff_calc = ideal_pred - qtd_aux_hist if ideal_pred is not None and math.isfinite(qtd_aux_hist) else None
                         diff_disp = f"{diff_calc:+.2f}" if diff_calc is not None and math.isfinite(diff_calc) else "-"
+                        urgency_label = _delta_urgency_label(diff_calc)
+                        urgency_color = _delta_urgency_color(urgency_label)
                         receita_total_loja = safe_float(row.get("ReceitaTotalMes"), float("nan"))
+                        criterio_denom_sim = safe_float(row.get(criterio_key), float("nan"))
+                        if not math.isfinite(criterio_denom_sim) or criterio_denom_sim <= 0:
+                            criterio_denom_sim = qtd_aux_hist
                         receita_por_aux = None
-                        if math.isfinite(receita_total_loja) and math.isfinite(qtd_aux_hist) and qtd_aux_hist > 0:
-                            receita_por_aux = receita_total_loja / qtd_aux_hist
-                        receita_aux_disp = (
-                            f"R$ {receita_por_aux:,.2f}"
-                            if receita_por_aux is not None and math.isfinite(receita_por_aux)
-                            else "-"
-                        )
+                        if math.isfinite(receita_total_loja) and math.isfinite(criterio_denom_sim) and criterio_denom_sim > 0:
+                            receita_por_aux = receita_total_loja / criterio_denom_sim
+                        if criterio_key == "SalarioMapeado":
+                            receita_aux_disp = (
+                                f"{receita_por_aux:,.2f}"
+                                if receita_por_aux is not None and math.isfinite(receita_por_aux)
+                                else "-"
+                            )
+                        else:
+                            receita_aux_disp = (
+                                f"R$ {receita_por_aux:,.2f}"
+                                if receita_por_aux is not None and math.isfinite(receita_por_aux)
+                                else "-"
+                            )
                         hist_disp = f"{qtd_aux_hist_int}" if qtd_aux_hist_int is not None else "-"
                         ideal_disp = f"{ideal_pred_int}" if ideal_pred_int is not None else "-"
                         st.markdown(
                             "<div style='border:1px solid #e5e7f0;border-radius:12px;padding:12px;background:#fff;'>"
-                            f"<div style='font-weight:600;margin-bottom:6px;color:#0c0c1f;'>{loja_label}</div>"
-                            f"<div style='font-size:0.9rem;color:#555;'>Qtd Aux Historico: <b>{hist_disp}</b></div>"
-                            f"<div style='font-size:0.9rem;color:#555;'>Qtd Aux Ideal: <b>{ideal_disp}</b></div>"
+                            "<div style='display:flex;align-items:center;gap:0.5rem;margin-bottom:6px;color:#0c0c1f;'>"
+                            f"<span style='width:10px;height:10px;background:{urgency_color};border-radius:3px;display:inline-block;'></span>"
+                            f"<div style='font-weight:600;'>{loja_label}</div>"
+                            "</div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Time Comercial Historico: <b>{hist_disp}</b></div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>Time Comercial Ideal: <b>{ideal_disp}</b></div>"
                             f"<div style='font-size:0.9rem;color:#555;'>Diferenca: <b>{diff_disp}</b></div>"
-                            f"<div style='font-size:0.9rem;color:#555;'>Faturamento/Qtd Aux Real: <b>{receita_aux_disp}</b></div>"
+                            f"<div style='font-size:0.85rem;color:#555;'>Urgencia: <b style='color:{urgency_color};'>{urgency_label or '-'}</b></div>"
+                            f"<div style='font-size:0.9rem;color:#555;'>{criterio_label} Real: <b>{receita_aux_disp}</b></div>"
                             "</div>"
                             ,
                             unsafe_allow_html=True,
@@ -1566,7 +1666,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             {"label": "Alto", "min": 3.0, "max": 5.0, "color": "#d8516d"},
                         ],
                         "faixa_otima": "Otimo < 1 auxiliar de erro medio",
-                        "helper": "Erro absoluto medio em auxiliares. Representa a diferenca media entre previsto e observado. Quanto menor, melhor.",
+                        "helper": "Erro absoluto medio em colaboradores. Representa a diferenca media entre previsto e observado. Quanto menor, melhor.",
                         "scale_max": 5.0,
                     },
                     {
@@ -1579,7 +1679,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             {"label": "Atencao", "min": 2.5, "max": 3.5, "color": "#f0b429"},
                             {"label": "Alto", "min": 3.5, "max": 5.5, "color": "#d8516d"},
                         ],
-                        "faixa_otima": "Otimo ate 1.5 auxiliares",
+                        "faixa_otima": "Otimo ate 1.5 colaboradores",
                         "helper": "Raiz do erro quadratico medio. Penaliza mais os erros grandes e indica estabilidade do modelo. Quanto menor, melhor.",
                         "scale_max": 5.5,
                     },
@@ -1687,25 +1787,26 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         qtd_aux_atual = None
         lookup_row = st.session_state.get("lookup_row")
         if st.session_state.get("lookup_found") and isinstance(lookup_row, dict):
-            qtd_aux_atual = safe_float(get_lookup(lookup_row, "QtdAux"))
+            qtd_aux_atual = safe_float(get_lookup_value("TotalMapeado", ["QtdAux"]))
 
         ideal_val = float(result_ideal.get("qtd_aux_ideal", 0.0))
         if qtd_aux_atual is not None and not math.isnan(qtd_aux_atual):
             diff_val = ideal_val - float(qtd_aux_atual)
+            urgency_badge = _render_urgency_badge(diff_val)
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
-                    f"<div style=\"font-size:1.1rem;font-weight:500;\">Qtd Aux Atual</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{qtd_aux_atual:.2f} aux</div>"
+                f"<div style=\"font-size:1.1rem;font-weight:500;\">Time Comercial Atual</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{qtd_aux_atual:.2f} colab.</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
             with col_res[1]:
                 st.markdown(
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
-                    f"<div style='font-size:1.3rem;font-weight:600;'>Qtd Aux Ideal</div>"
-                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{ideal_val:.2f} aux</div>"
+                f"<div style='font-size:1.3rem;font-weight:600;'>Time Comercial Ideal</div>"
+                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{ideal_val:.2f} colab.</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1713,12 +1814,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;'>"
                     f"<div style=\"font-size:1.1rem;font-weight:500;\">Diferenca (ideal - atual)</div>"
-                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} aux</div>"
+                    f"<div style=\"font-size:1.5rem;font-weight:500;\">{diff_val:+.2f} colab.</div>"
+                    f"{urgency_badge}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
         else:
-            st.metric("Qtd Auxiliares (ideal)", f"{ideal_val}")
+            st.metric("Time Comercial (ideal)", f"{ideal_val}")
 
         st.caption(
             f"Carga: {result_ideal['carga_total_horas']:.2f} h/semana | "
@@ -1807,7 +1909,7 @@ def _render_queue_comparison_block(
     rho_fila = fila_diag.get("rho_fila")
     rho_target_disp = fila_diag.get("rho_target", rho_target_use)
     st.subheader(f"Modelo Teoria das Filas{contexto}")
-    fila_text = f"Headcount (fila): {c_fila:.2f} auxiliares"
+    fila_text = f"Headcount (fila): {c_fila:.2f} colaboradores"
     if _metric_has_value(rho_fila):
         fila_text += f" (ρ ≈ {rho_fila:.2f}, alvo ρ_target={rho_target_disp:.2f})"
     st.write(fila_text)
@@ -1821,15 +1923,15 @@ def _render_queue_comparison_block(
         if mu_h > 0 and c_pred > 0:
             rho_val = lambda_h / (c_pred * mu_h)
         delta_abs = float(c_pred - c_fila)
-        line = f"{label}: {c_pred} auxiliares"
+        line = f"{label}: {c_pred} colaboradores"
         extras: List[str] = []
         if _metric_has_value(rho_val):
             extras.append(f"ρ ≈ {rho_val:.2f}")
         if c_fila > 0:
             delta_pct = delta_abs / c_fila
-            extras.append(f"Δ vs fila: {delta_abs:+.2f} aux ({delta_pct*100:+.1f}%)")
+            extras.append(f"Δ vs fila: {delta_abs:+.2f} colab. ({delta_pct*100:+.1f}%)")
         elif delta_abs != 0:
-            extras.append(f"Δ vs fila: {delta_abs:+.2f} aux")
+            extras.append(f"Δ vs fila: {delta_abs:+.2f} colab.")
         if extras:
             line += f" ({'; '.join(extras)})"
         st.write(line)
