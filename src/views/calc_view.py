@@ -115,6 +115,119 @@ def _render_urgency_badge(delta_val: Optional[float]) -> str:
     )
 
 
+def _first_col(df: Optional[pd.DataFrame], options: List[str]) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    for col in options:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _compute_cargo_suggestion(
+    pessoas_df: Optional[pd.DataFrame],
+    indicadores_df: Optional[pd.DataFrame],
+    total_ideal: float,
+    base_ativa_val: Optional[float] = None,
+) -> Optional[Dict[str, float]]:
+    total_val = safe_float(total_ideal, 0.0)
+    if not math.isfinite(total_val) or total_val <= 0:
+        return None
+    lid_col = _first_col(pessoas_df, ["QtdLid", "QtdLideres", "QtdLider"])
+    aux_col = _first_col(pessoas_df, ["QtdAux", "QtdAuxiliar", "QtdAuxiliares"])
+    estag_col = _first_col(pessoas_df, ["Estag&Aprend", "Estag&Aprendizes", "Estagiarios", "Estag"])
+    loja_col = _first_col(pessoas_df, ["Loja"])
+    if pessoas_df is None or pessoas_df.empty or not lid_col or not aux_col:
+        return None
+    cols = [lid_col, aux_col]
+    if estag_col:
+        cols.append(estag_col)
+    if loja_col:
+        cols.append(loja_col)
+    base = pessoas_df[cols].copy()
+    for col in cols:
+        if col != loja_col:
+            base[col] = pd.to_numeric(base[col], errors="coerce")
+    lid_vals = base[lid_col]
+    aux_vals = base[aux_col]
+    if estag_col:
+        estag_vals = base[estag_col]
+    else:
+        estag_vals = pd.Series(0.0, index=base.index, dtype="float64")
+    aux_estag = (aux_vals + estag_vals).replace([float("inf"), float("-inf")], np.nan)
+    valid_mask = (lid_vals > 0) & (aux_estag > 0)
+
+    ratio_base = pd.DataFrame(
+        {
+            "ratio": (aux_estag / lid_vals).replace([float("inf"), float("-inf")], np.nan),
+            "aux_share": (aux_vals / aux_estag).replace([float("inf"), float("-inf")], np.nan),
+            "aux_lider": (aux_vals / lid_vals).replace([float("inf"), float("-inf")], np.nan),
+            "estag_lider": (estag_vals / lid_vals).replace([float("inf"), float("-inf")], np.nan),
+        }
+    )
+    ratio_base = ratio_base[valid_mask]
+
+    base_ativa = safe_float(base_ativa_val, float("nan"))
+    faixa_label = "Global"
+    if (
+        indicadores_df is not None
+        and not indicadores_df.empty
+        and loja_col
+        and "Loja" in indicadores_df.columns
+        and math.isfinite(base_ativa)
+        and base_ativa > 0
+    ):
+        ind = indicadores_df.copy()
+        ind_cols = [c for c in ["Loja", "BaseAtiva"] if c in ind.columns]
+        if "BaseAtiva" in ind_cols:
+            ind = ind[ind_cols]
+            ind["Loja"] = ind["Loja"].astype(str).str.strip()
+            base["Loja"] = base["Loja"].astype(str).str.strip()
+            merged = base[[loja_col]].copy()
+            merged["Loja"] = merged[loja_col].astype(str).str.strip()
+            merged = merged.merge(ind, on="Loja", how="left")
+            merged["BaseAtiva"] = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
+            ratio_base = ratio_base.join(merged["BaseAtiva"])
+            if ratio_base["BaseAtiva"].notna().sum() >= 4:
+                bins = pd.qcut(ratio_base["BaseAtiva"], q=4, duplicates="drop")
+                target_bin = None
+                try:
+                    target_bin = bins[(ratio_base["BaseAtiva"] - base_ativa).abs().idxmin()]
+                except Exception:
+                    target_bin = None
+                if target_bin is not None:
+                    ratio_base = ratio_base[bins == target_bin]
+                    try:
+                        left = float(target_bin.left)
+                        right = float(target_bin.right)
+                        faixa_label = f"{left:.2f}-{right:.2f}"
+                    except Exception:
+                        faixa_label = "Faixa BaseAtiva"
+
+    aux_lider = ratio_base["aux_lider"].dropna()
+    estag_lider = ratio_base["estag_lider"].dropna()
+    if aux_lider.empty or estag_lider.empty:
+        return None
+    aux_lider_med = float(aux_lider.median())
+    estag_lider_med = float(estag_lider.median())
+    if not math.isfinite(aux_lider_med) or not math.isfinite(estag_lider_med):
+        return None
+    denom = 1.0 + aux_lider_med + estag_lider_med
+    if denom <= 0:
+        return None
+    lideres = total_val / denom
+    auxiliares = lideres * aux_lider_med
+    estag = lideres * estag_lider_med
+    return {
+        "lideres": lideres,
+        "auxiliares": auxiliares,
+        "estag": estag,
+        "faixa_label": faixa_label,
+        "aux_lider": aux_lider_med,
+        "estag_lider": estag_lider_med,
+    }
+
+
 def _select_similar_lojas(
     train_df: pd.DataFrame,
     target_features: Dict[str, object],
@@ -916,6 +1029,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     box-shadow: none !important;
                     padding: 0 !important;
                 }
+                #calc-checkbox-group .st-emotion-cache-ocqkz7.e1f1d6gn5 {
+                    align-items: center !important;
+                }
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -1079,7 +1195,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             criterio_default = get_criterio_mapeado_label()
             criterio_index = criterio_options.index(criterio_default) if criterio_default in criterio_options else 0
             criterio_label = st.selectbox(
-                "Criterio de referencia para faturamento mapeado",
+                "Critério de referência para estimativa ideal",
                 options=criterio_options,
                 index=criterio_index,
                 key="criterio_mapeado_label_calc",
@@ -1089,16 +1205,22 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             criterio_key = get_criterio_mapeado_key()
 
             mostrar_metricas = False
+            mostrar_sugestoes_cargo = False
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
+                st.markdown("<div id='calc-checkbox-group'>", unsafe_allow_html=True)
                 if modo_ml:
-                    # espaçamento para alinhar verticalmente com o slider ao lado
-                    st.markdown("<div style='height: 1.6rem'></div>", unsafe_allow_html=True)
                     mostrar_metricas = st.checkbox(
                         "Mostrar métricas/IC",
                         value=False,
                         help="Ative apenas se precisar das métricas e intervalos de confiança. Mantendo desativado o cálculo fica mais rápido.",
                     )
+                mostrar_sugestoes_cargo = st.checkbox(
+                    "Retornar sugestoes por cargo",
+                    value=False,
+                    help="Mostra a divisao sugerida entre Lideres, Auxiliares e Estag./Aprend. abaixo do card Ideal.",
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
             with col2:
 
                 if modo_ml:
@@ -1327,6 +1449,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 margem,
                 ["catboost"],
                 anchor_quantile=anchor_quantile,
+                apply_cluster_blend=False,
             ).get("catboost", {})
         if mostrar_metricas and cat_ideal:
             ci_ideal = calcular_intervalos_modelos(
@@ -1337,6 +1460,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 margem,
                 ["catboost"],
                 anchor_quantile=anchor_quantile,
+                apply_cluster_blend=False,
                 skip_cap_cols=skip_cap_cols_ideal,
             ).get("catboost", {})
 
@@ -1344,6 +1468,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             st.success("Previsao (Machine Learning) concluida!")
             pred_hist_raw = float(cat_hist.get("pred") or 0.0)
             pred_ideal_raw = float(cat_ideal.get("pred") or 0.0)
+            pred_ideal_model = pred_ideal_raw
             # Ajuste de elasticidade para manter monotonicidade em relação à BaseAtiva
             if base_ativa_override and beta_base_aux and base_ativa_obs > 0:
                 ratio_base = safe_float(base_ativa, 0.0) / max(base_ativa_obs, 1e-6)
@@ -1405,6 +1530,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             for key_ci in ["ci_low", "ci_high", "ci_low_disp", "ci_high_disp", "ci_mid_disp", "pred_mean"]:
                                 if key_ci in ci_ideal and ci_ideal[key_ci] is not None and math.isfinite(ci_ideal[key_ci]):
                                     ci_ideal[key_ci] = max(float(ci_ideal[key_ci]), pred_base_ref)
+            if ci_ideal:
+                ci_low_val = ci_ideal.get("ci_low")
+                ci_high_val = ci_ideal.get("ci_high")
+                if ci_low_val is not None and math.isfinite(ci_low_val):
+                    ci_ideal["ci_low_disp"] = float(ci_low_val)
+                if ci_high_val is not None and math.isfinite(ci_high_val):
+                    ci_ideal["ci_high_disp"] = float(ci_high_val)
             pred_hist_int = int(round(pred_hist_raw))
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
@@ -1432,6 +1564,47 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 receita_aux_hist_disp = f"R$ {receita_aux_hist:,.2f}" if receita_aux_hist else "-"
                 receita_aux_ideal_disp = f"R$ {receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
             urgency_badge = _render_urgency_badge(diff_val)
+            cargo_sugestao_html = ""
+            if mostrar_sugestoes_cargo:
+                cargo_sugestao = _compute_cargo_suggestion(
+                    pessoas_df,
+                    st.session_state.get("fIndicadores"),
+                    pred_ideal_raw,
+                    base_ativa,
+                )
+                if cargo_sugestao:
+                    cargo_sugestao_html = (
+                        "<div style='margin-top:8px;text-align:center;color:#0c0863;background-color: #f0f2f6; "
+                        "border-radius: 10px; padding: 10px 12px;'>"
+                        "<div style='display:flex;flex-wrap:wrap;gap:12px;justify-content:center;'>"
+                        "<div style='flex:1 1 120px;min-width:120px;'>"
+                        "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Lideres</div>"
+                        f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                        f"{int(round(cargo_sugestao['lideres']))}</div>"
+                        f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                        f"({cargo_sugestao['lideres']:.2f} colab.)</div>"
+                        "</div>"
+                        "<div style='flex:1 1 120px;min-width:120px;'>"
+                        "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Auxiliares</div>"
+                        f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                        f"{int(round(cargo_sugestao['auxiliares']))}</div>"
+                        f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                        f"({cargo_sugestao['auxiliares']:.2f} colab.)</div>"
+                        "</div>"
+                        "<div style='flex:1 1 120px;min-width:120px;'>"
+                        "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Estag./Aprend.</div>"
+                        f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                        f"{int(round(cargo_sugestao['estag']))}</div>"
+                        f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                        f"({cargo_sugestao['estag']:.2f} colab.)</div>"
+                        "</div>"
+                        "</div>"
+                        f"<div style='font-size:0.82rem;color:#6c6c6c;margin-top:6px;'>"
+                        f"Faixa BaseAtiva: {cargo_sugestao['faixa_label']} | "
+                        f"Aux/Lider: {cargo_sugestao['aux_lider']:.2f} | "
+                        f"Estag/Lider: {cargo_sugestao['estag_lider']:.2f}</div>"
+                        "</div>"
+                    )
             col_res = st.columns(3)
             with col_res[0]:
                 st.markdown(
@@ -1454,12 +1627,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
                     f"<div style='font-size:1.3rem;font-weight:600;'>Time Comercial Ideal</div>"
-                    f"<div style='font-size:2.0rem;font-weight:700; line-height: 0.85;'>{pred_ideal_int} colaboradores</div>"
+                    f"<div style='font-size:clamp(1.4rem, 3vw, 2.0rem);font-weight:700; line-height: 0.85;'>"
+                    f"{pred_ideal_int} colaboradores</div>"
                     f"<div style='font-size:1.0rem;font-weight:400;color:#6c6c6c;'>({pred_ideal_raw:.2f} colab.)</div>"
                     f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>{criterio_label}: {receita_aux_ideal_disp}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if cargo_sugestao_html:
+                    st.markdown(cargo_sugestao_html, unsafe_allow_html=True)
                 if ci_ideal:
                     low_txt = _format_interval_value(ci_ideal.get("ci_low_disp", ci_ideal.get("ci_low")))
                     high_txt = _format_interval_value(ci_ideal.get("ci_high_disp", ci_ideal.get("ci_high")))
@@ -1790,6 +1966,47 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             qtd_aux_atual = safe_float(get_lookup_value("TotalMapeado", ["QtdAux"]))
 
         ideal_val = float(result_ideal.get("qtd_aux_ideal", 0.0))
+        cargo_sugestao_html = ""
+        if mostrar_sugestoes_cargo:
+            cargo_sugestao = _compute_cargo_suggestion(
+                pessoas_df,
+                st.session_state.get("fIndicadores"),
+                ideal_val,
+                base_ativa,
+            )
+            if cargo_sugestao:
+                cargo_sugestao_html = (
+                    "<div style='margin-top:8px;text-align:center;color:#0c0863;background-color: #f0f2f6; "
+                    "border-radius: 10px; padding: 10px 12px;'>"
+                    "<div style='display:flex;flex-wrap:wrap;gap:12px;justify-content:center;'>"
+                    "<div style='flex:1 1 120px;min-width:120px;'>"
+                    "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Lideres</div>"
+                    f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                    f"{int(round(cargo_sugestao['lideres']))}</div>"
+                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                    f"({cargo_sugestao['lideres']:.2f} colab.)</div>"
+                    "</div>"
+                    "<div style='flex:1 1 120px;min-width:120px;'>"
+                    "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Auxiliares</div>"
+                    f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                    f"{int(round(cargo_sugestao['auxiliares']))}</div>"
+                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                    f"({cargo_sugestao['auxiliares']:.2f} colab.)</div>"
+                    "</div>"
+                    "<div style='flex:1 1 120px;min-width:120px;'>"
+                    "<div style='font-size:0.95rem;font-weight:600;color:#0c0863;'>Estag./Aprend.</div>"
+                    f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                    f"{int(round(cargo_sugestao['estag']))}</div>"
+                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
+                    f"({cargo_sugestao['estag']:.2f} colab.)</div>"
+                    "</div>"
+                    "</div>"
+                    f"<div style='font-size:0.82rem;color:#6c6c6c;margin-top:6px;'>"
+                    f"Faixa BaseAtiva: {cargo_sugestao['faixa_label']} | "
+                    f"Aux/Lider: {cargo_sugestao['aux_lider']:.2f} | "
+                    f"Estag/Lider: {cargo_sugestao['estag_lider']:.2f}</div>"
+                    "</div>"
+                )
         if qtd_aux_atual is not None and not math.isnan(qtd_aux_atual):
             diff_val = ideal_val - float(qtd_aux_atual)
             urgency_badge = _render_urgency_badge(diff_val)
@@ -1806,10 +2023,13 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.markdown(
                     f"<div style='text-align:center;color:#0c0863;background-color: #f0f2f6; border-radius: 10px; padding-bottom: 10px;'>"
                 f"<div style='font-size:1.3rem;font-weight:600;'>Time Comercial Ideal</div>"
-                    f"<div style='font-size:2.0rem;font-weight:600; line-height: 0.85;'>{ideal_val:.2f} colab.</div>"
+                    f"<div style='font-size:clamp(1.4rem, 3vw, 2.0rem);font-weight:600; line-height: 0.85;'>"
+                    f"{ideal_val:.2f} colab.</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if cargo_sugestao_html:
+                    st.markdown(cargo_sugestao_html, unsafe_allow_html=True)
             with col_res[2]:
                 st.markdown(
                     f"<div style='text-align:center;'>"

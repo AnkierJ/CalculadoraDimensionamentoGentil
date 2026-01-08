@@ -154,7 +154,7 @@ def render_comparativo_tab(tab_container) -> None:
         criterio_default = get_criterio_mapeado_label()
         criterio_index = criterio_options.index(criterio_default) if criterio_default in criterio_options else 0
         criterio_label = st.selectbox(
-            "Criterio de referencia para faturamento mapeado",
+            "Critério de referência para estimativa ideal",
             options=criterio_options,
             index=criterio_index,
             key="criterio_mapeado_label_comp",
