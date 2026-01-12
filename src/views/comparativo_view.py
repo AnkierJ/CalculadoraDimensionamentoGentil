@@ -276,7 +276,12 @@ def render_comparativo_tab(tab_container) -> None:
             st.warning("Selecione ao menos uma loja para continuar.")
             return
 
-        criterio_cache_bump = 1000 if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25") else 0
+        if criterio_key == "SalarioMapeadoIAF25":
+            criterio_cache_bump = 2000
+        elif criterio_key == "SalarioMapeado":
+            criterio_cache_bump = 1000
+        else:
+            criterio_cache_bump = 0
         cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_hist = _train_cached(
             train_df,

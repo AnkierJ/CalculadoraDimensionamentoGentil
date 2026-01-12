@@ -2,7 +2,9 @@
 # Imports
 # =============================================================================
 import math
-from typing import Dict, List, Optional
+import unicodedata
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -226,6 +228,100 @@ def _compute_cargo_suggestion(
         "aux_lider": aux_lider_med,
         "estag_lider": estag_lider_med,
     }
+
+
+def _norm_col_key(text: object) -> str:
+    if text is None:
+        return ""
+    norm = unicodedata.normalize("NFKD", str(text))
+    norm = "".join(ch for ch in norm if ch.isalnum())
+    return norm.casefold()
+
+
+@st.cache_data(show_spinner=False)
+def _load_custo_por_cargo_df() -> pd.DataFrame:
+    data_path = Path(__file__).resolve().parents[2] / "data" / "CustoPorCargo.csv"
+    if not data_path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(data_path, sep=";", encoding="utf-8-sig", decimal=",")
+    except Exception:
+        df = pd.read_csv(data_path)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def _get_custo_medio_por_grupo(custo_df: pd.DataFrame) -> Dict[str, float]:
+    if custo_df is None or custo_df.empty:
+        return {}
+    col_cargo = None
+    col_salario = None
+    for col in custo_df.columns:
+        col_norm = _norm_col_key(col)
+        if col_norm == "cargo":
+            col_cargo = col
+        if "salario" in col_norm:
+            col_salario = col
+    if not col_cargo or not col_salario:
+        return {}
+    buckets = {"auxiliar": [], "lider": [], "estag": []}
+    for _, row in custo_df.iterrows():
+        cargo = str(row.get(col_cargo, "")).strip()
+        salario = row.get(col_salario)
+        if salario is None or (isinstance(salario, float) and pd.isna(salario)):
+            continue
+        salario_val = safe_float(salario, float("nan"))
+        if not math.isfinite(salario_val) or salario_val <= 0:
+            continue
+        cargo_norm = normalize_processo_nome(cargo)
+        if "auxiliar" in cargo_norm:
+            buckets["auxiliar"].append(float(salario_val))
+        elif "lider" in cargo_norm:
+            buckets["lider"].append(float(salario_val))
+        elif "estag" in cargo_norm or "aprendiz" in cargo_norm:
+            buckets["estag"].append(float(salario_val))
+    custo_medios: Dict[str, float] = {}
+    for key, vals in buckets.items():
+        if vals:
+            custo_medios[key] = float(sum(vals) / len(vals))
+    return custo_medios
+
+
+def _calc_salario_map_from_sugestao(
+    cargo_sugestao: Optional[Dict[str, float]],
+    custo_medio: Dict[str, float],
+) -> Tuple[Optional[float], Optional[Dict[str, object]]]:
+    if not cargo_sugestao or not custo_medio:
+        return None, None
+    qtd_lider = int(round(float(cargo_sugestao.get("lideres", 0.0) or 0.0)))
+    qtd_aux = int(round(float(cargo_sugestao.get("auxiliares", 0.0) or 0.0)))
+    qtd_estag = int(round(float(cargo_sugestao.get("estag", 0.0) or 0.0)))
+    total = 0.0
+    detalhes = {
+        "lideres": qtd_lider,
+        "auxiliares": qtd_aux,
+        "estag": qtd_estag,
+        "custo_lider": custo_medio.get("lider"),
+        "custo_aux": custo_medio.get("auxiliar"),
+        "custo_estag": custo_medio.get("estag"),
+    }
+    for key, qtd in (("lider", qtd_lider), ("auxiliar", qtd_aux), ("estag", qtd_estag)):
+        custo = custo_medio.get(key)
+        if custo is not None and math.isfinite(custo):
+            total += float(qtd) * float(custo)
+    if total <= 0:
+        return None, detalhes
+    detalhes["salario_total"] = total
+    return total, detalhes
+
+
+def _normalize_iaf_value(raw_val: object) -> Optional[float]:
+    iaf_val = safe_float(raw_val, float("nan"))
+    if not math.isfinite(iaf_val) or iaf_val <= 0:
+        return None
+    if iaf_val > 1.5:
+        iaf_val = iaf_val / 100.0
+    return iaf_val if math.isfinite(iaf_val) and iaf_val > 0 else None
 
 
 def _select_similar_lojas(
@@ -1302,7 +1398,12 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     model_bundle_hist = None
     model_bundle_ideal = None
     if modo_ml:
-        criterio_cache_bump = 1000 if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25") else 0
+        if criterio_key == "SalarioMapeadoIAF25":
+            criterio_cache_bump = 2000
+        elif criterio_key == "SalarioMapeado":
+            criterio_cache_bump = 1000
+        else:
+            criterio_cache_bump = 0
         cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_bundle_hist = _train_cached(
             train_df,
@@ -1543,6 +1644,17 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             criterio_row = st.session_state.get("lookup_row") or {}
             criterio_is_iaf = criterio_key == "SalarioMapeadoIAF25"
             criterio_source_key = "SalarioMapeado" if criterio_is_iaf else criterio_key
+            salario_map_ideal = None
+            if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
+                custo_df = _load_custo_por_cargo_df()
+                custo_medio = _get_custo_medio_por_grupo(custo_df)
+                cargo_sugestao_calc = _compute_cargo_suggestion(
+                    pessoas_df,
+                    st.session_state.get("fIndicadores"),
+                    pred_ideal_raw,
+                    base_ativa,
+                )
+                salario_map_ideal, _ = _calc_salario_map_from_sugestao(cargo_sugestao_calc, custo_medio)
             if criterio_key == "TotalMapeado":
                 criterio_denom_hist = pred_hist_raw
                 criterio_denom_ideal = pred_ideal_raw
@@ -1550,7 +1662,11 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 criterio_denom_hist = safe_float(criterio_row.get(criterio_source_key), float("nan"))
                 if not math.isfinite(criterio_denom_hist) or criterio_denom_hist <= 0:
                     criterio_denom_hist = pred_hist_raw
-                criterio_denom_ideal = safe_float(criterio_row.get(criterio_source_key), float("nan"))
+                criterio_denom_ideal = (
+                    float(salario_map_ideal)
+                    if salario_map_ideal is not None and math.isfinite(salario_map_ideal) and salario_map_ideal > 0
+                    else safe_float(criterio_row.get(criterio_source_key), float("nan"))
+                )
                 if not math.isfinite(criterio_denom_ideal) or criterio_denom_ideal <= 0:
                     criterio_denom_ideal = pred_ideal_raw
             receita_aux_hist = None
@@ -1560,10 +1676,21 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             if receita_total > 0 and criterio_denom_ideal > 0:
                 receita_aux_ideal = receita_total / criterio_denom_ideal
             if criterio_is_iaf:
-                iaf_val = safe_float(criterio_row.get("%IAF25"), float("nan"))
-                if math.isfinite(iaf_val):
-                    if iaf_val > 1.5:
-                        iaf_val = iaf_val / 100.0
+                iaf_candidates = [
+                    criterio_row.get("%IAF25"),
+                    (features_input_ideal_ml or {}).get("%IAF25"),
+                    (features_input_ideal or {}).get("%IAF25"),
+                ]
+                if loja_nome_alvo_submit:
+                    iaf_from_train = (features_input_ideal_ml or {}).get("%IAF25")
+                    if iaf_from_train is not None:
+                        iaf_candidates.append(iaf_from_train)
+                iaf_val = None
+                for raw in iaf_candidates:
+                    iaf_val = _normalize_iaf_value(raw)
+                    if iaf_val is not None:
+                        break
+                if iaf_val is not None:
                     if receita_aux_hist is not None:
                         receita_aux_hist = receita_aux_hist * iaf_val
                     if receita_aux_ideal is not None:
