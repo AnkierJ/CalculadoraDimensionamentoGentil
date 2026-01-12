@@ -1302,7 +1302,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     model_bundle_hist = None
     model_bundle_ideal = None
     if modo_ml:
-        criterio_cache_bump = 1000 if criterio_key == "SalarioMapeado" else 0
+        criterio_cache_bump = 1000 if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25") else 0
         cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_bundle_hist = _train_cached(
             train_df,
@@ -1541,14 +1541,16 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             pred_ideal_int = int(round(pred_ideal_raw))
             diff_val = pred_ideal_raw - pred_hist_raw
             criterio_row = st.session_state.get("lookup_row") or {}
+            criterio_is_iaf = criterio_key == "SalarioMapeadoIAF25"
+            criterio_source_key = "SalarioMapeado" if criterio_is_iaf else criterio_key
             if criterio_key == "TotalMapeado":
                 criterio_denom_hist = pred_hist_raw
                 criterio_denom_ideal = pred_ideal_raw
             else:
-                criterio_denom_hist = safe_float(criterio_row.get(criterio_key), float("nan"))
+                criterio_denom_hist = safe_float(criterio_row.get(criterio_source_key), float("nan"))
                 if not math.isfinite(criterio_denom_hist) or criterio_denom_hist <= 0:
                     criterio_denom_hist = pred_hist_raw
-                criterio_denom_ideal = safe_float(criterio_row.get(criterio_key), float("nan"))
+                criterio_denom_ideal = safe_float(criterio_row.get(criterio_source_key), float("nan"))
                 if not math.isfinite(criterio_denom_ideal) or criterio_denom_ideal <= 0:
                     criterio_denom_ideal = pred_ideal_raw
             receita_aux_hist = None
@@ -1557,7 +1559,16 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             receita_aux_ideal = None
             if receita_total > 0 and criterio_denom_ideal > 0:
                 receita_aux_ideal = receita_total / criterio_denom_ideal
-            if criterio_key == "SalarioMapeado":
+            if criterio_is_iaf:
+                iaf_val = safe_float(criterio_row.get("%IAF25"), float("nan"))
+                if math.isfinite(iaf_val):
+                    if iaf_val > 1.5:
+                        iaf_val = iaf_val / 100.0
+                    if receita_aux_hist is not None:
+                        receita_aux_hist = receita_aux_hist * iaf_val
+                    if receita_aux_ideal is not None:
+                        receita_aux_ideal = receita_aux_ideal * iaf_val
+            if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
                 receita_aux_hist_disp = f"{receita_aux_hist:,.2f}" if receita_aux_hist else "-"
                 receita_aux_ideal_disp = f"{receita_aux_ideal:,.2f}" if receita_aux_ideal else "-"
             else:
@@ -1709,13 +1720,21 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         urgency_label = _delta_urgency_label(diff_calc)
                         urgency_color = _delta_urgency_color(urgency_label)
                         receita_total_loja = safe_float(row.get("ReceitaTotalMes"), float("nan"))
-                        criterio_denom_sim = safe_float(row.get(criterio_key), float("nan"))
+                        criterio_source_key = "SalarioMapeado" if criterio_is_iaf else criterio_key
+                        criterio_denom_sim = safe_float(row.get(criterio_source_key), float("nan"))
                         if not math.isfinite(criterio_denom_sim) or criterio_denom_sim <= 0:
                             criterio_denom_sim = qtd_aux_hist
                         receita_por_aux = None
                         if math.isfinite(receita_total_loja) and math.isfinite(criterio_denom_sim) and criterio_denom_sim > 0:
                             receita_por_aux = receita_total_loja / criterio_denom_sim
-                        if criterio_key == "SalarioMapeado":
+                        if criterio_is_iaf:
+                            iaf_val = safe_float(row.get("%IAF25"), float("nan"))
+                            if math.isfinite(iaf_val):
+                                if iaf_val > 1.5:
+                                    iaf_val = iaf_val / 100.0
+                                if receita_por_aux is not None and math.isfinite(receita_por_aux):
+                                    receita_por_aux = receita_por_aux * iaf_val
+                        if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
                             receita_aux_disp = (
                                 f"{receita_por_aux:,.2f}"
                                 if receita_por_aux is not None and math.isfinite(receita_por_aux)

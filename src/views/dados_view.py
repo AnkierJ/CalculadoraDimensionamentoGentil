@@ -121,7 +121,24 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
         # Critérios
         # =============================================================================
         with aba_criterios:
-            st.caption("Rankings de faturamento por TotalMapeado e SalarioMapeado.")
+            st.markdown(
+                """
+                <style>
+                .criteria-rankings [data-testid="stDataFrame"] {
+                    overflow: visible !important;
+                }
+                .criteria-rankings [data-testid="stDataFrame"] > div {
+                    overflow: visible !important;
+                }
+                .criteria-rankings [data-testid="stDataFrame"] div[role="grid"] {
+                    overflow-x: hidden !important;
+                    overflow-y: auto !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption("Rankings de faturamento por TotalMapeado, SalarioMapeado e SalarioMapeado*%IAF25.")
             estrutura_df = st.session_state.get("dEstrutura")
             pessoas_df = st.session_state.get("dPessoas")
             indicadores_df = st.session_state.get("fIndicadores")
@@ -164,6 +181,11 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                 if "SalarioMapeado" in train_norm.columns
                 else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
             )
+            iaf_25 = (
+                pd.to_numeric(train_norm["%IAF25"], errors="coerce")
+                if "%IAF25" in train_norm.columns
+                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+            )
             qtd_aux = (
                 pd.to_numeric(train_norm["QtdAux"], errors="coerce")
                 if "QtdAux" in train_norm.columns
@@ -174,6 +196,10 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
             ratio_total = receita / total_map.replace(0, pd.NA)
             salario_fallback = salario_map.where(salario_map.notna() & (salario_map > 0), total_map)
             ratio_salario = receita / salario_fallback.replace(0, pd.NA)
+            iaf_norm = iaf_25.copy()
+            if not iaf_norm.empty:
+                iaf_norm = iaf_norm.where(iaf_norm <= 1.5, iaf_norm / 100.0)
+            ratio_salario_iaf = ratio_salario * iaf_norm.fillna(1.0)
 
             horas_disp = float(st.session_state.get("horas_disp_semanais", 44.0))
             margem = float(st.session_state.get("folga_operacional", 0.15))
@@ -232,6 +258,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                     "Praca": praca_series,
                     "Faturamento/TotalMap": ratio_total,
                     "Faturamento/SalarioMap": ratio_salario,
+                    "Faturamento/SalarioMap*IAF25": ratio_salario_iaf,
                 }
             )
 
@@ -342,6 +369,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                 color_series = pd.Series(colors, index=rank_df.index)
                 return rank_df, color_series
 
+            st.markdown('<div class="criteria-rankings">', unsafe_allow_html=True)
             col_left, col_right = st.columns(2)
             with col_left:
                 st.markdown("#### Ranking Faturamento/TotalMap")
@@ -373,7 +401,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                         use_container_width=True,
                         height=520,
                         column_config={
-                            "Indicador": st.column_config.Column(label=" ", width="small"),
+                            "Indicador": st.column_config.Column(label="Indicador", width="small"),
                             "Time Comercial (TOTAL MAP)": st.column_config.Column(width="small"),
                             "Porte": st.column_config.Column(width="small"),
                             "Praca": st.column_config.Column(width="small"),
@@ -409,9 +437,45 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                         use_container_width=True,
                         height=520,
                         column_config={
-                            "Indicador": st.column_config.Column(label=" ", width="small"),
+                            "Indicador": st.column_config.Column(label="Indicador", width="small"),
                             "Time Comercial (TOTAL MAP)": st.column_config.Column(width="small"),
                             "Porte": st.column_config.Column(width="small"),
                             "Praca": st.column_config.Column(width="small"),
                         },
                     )
+            st.markdown("#### Ranking Faturamento/SalarioMap*%IAF25")
+            rank_df, color_series = _build_rank_dataframe(
+                filtered_df,
+                ratio_col="Faturamento/SalarioMap*IAF25",
+                ratio_label="Faturamento/SalarioMap*%IAF25",
+                use_brl=False,
+            )
+            if rank_df is None or rank_df.empty:
+                st.info("Sem registros.")
+            else:
+                def _style_indicator(row: pd.Series) -> List[str]:
+                    color = "#e5e7eb"
+                    if color_series is not None and row.name in color_series.index:
+                        color = color_series.loc[row.name]
+                    styles = []
+                    for col in row.index:
+                        if col == "Indicador":
+                            styles.append(
+                                f"background-color: {color}; border-radius: 6px;"
+                            )
+                        else:
+                            styles.append("")
+                    return styles
+                styled = rank_df.style.apply(_style_indicator, axis=1)
+                st.dataframe(
+                    styled,
+                    use_container_width=True,
+                    height=520,
+                    column_config={
+                        "Indicador": st.column_config.Column(label="Indicador", width="small"),
+                        "Time Comercial (TOTAL MAP)": st.column_config.Column(width="small"),
+                        "Porte": st.column_config.Column(width="small"),
+                        "Praca": st.column_config.Column(width="small"),
+                    },
+                )
+            st.markdown("</div>", unsafe_allow_html=True)

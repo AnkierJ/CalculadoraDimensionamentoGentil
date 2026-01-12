@@ -73,6 +73,7 @@ CRITERIO_MAPEADO_DEFAULT = "TotalMapeado"
 CRITERIO_MAPEADO_OPTIONS = {
     "Faturamento/TotalMapeado": "TotalMapeado",
     "Faturamento/SalarioMapeado": "SalarioMapeado",
+    "Faturamento/SalarioMapeado*%IAF25": "SalarioMapeadoIAF25",
 }
 MAPEADO_HELPER_TEXT = (
     "Mapeado abrange os cargos de auxiliares, lideres, caixas, "
@@ -323,6 +324,7 @@ def get_schema_fIndicadores() -> Dict[str, str]:
         "Pedidos/Hora": "float",
         "Pedidos/Dia": "float",
         "Itens/Pedido": "float",
+        "%IAF25": "float",
     }
 
 

@@ -276,7 +276,7 @@ def render_comparativo_tab(tab_container) -> None:
             st.warning("Selecione ao menos uma loja para continuar.")
             return
 
-        criterio_cache_bump = 1000 if criterio_key == "SalarioMapeado" else 0
+        criterio_cache_bump = 1000 if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25") else 0
         cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
         model_hist = _train_cached(
             train_df,
@@ -346,15 +346,23 @@ def render_comparativo_tab(tab_container) -> None:
 
             receita = safe_float(feature_row.get("ReceitaTotalMes"))
             criterio_denom = None
+            criterio_is_iaf = criterio_key == "SalarioMapeadoIAF25"
+            criterio_source_key = "SalarioMapeado" if criterio_is_iaf else criterio_key
             if pessoas_row:
-                criterio_denom = safe_float(pessoas_row.get(criterio_key), float("nan"))
-                if criterio_key == "SalarioMapeado" and (not math.isfinite(criterio_denom) or criterio_denom <= 0):
+                criterio_denom = safe_float(pessoas_row.get(criterio_source_key), float("nan"))
+                if criterio_source_key == "SalarioMapeado" and (not math.isfinite(criterio_denom) or criterio_denom <= 0):
                     criterio_denom = safe_float(pessoas_row.get("TotalMapeado"), float("nan"))
             if criterio_denom is None or not math.isfinite(criterio_denom) or criterio_denom <= 0:
                 criterio_denom = qtd_aux_real_i
             receita_por_criterio_real = None
             if receita and criterio_denom and criterio_denom > 0:
                 receita_por_criterio_real = receita / criterio_denom
+                if criterio_is_iaf:
+                    iaf_val = safe_float(feature_row.get("%IAF25"), float("nan"))
+                    if math.isfinite(iaf_val):
+                        if iaf_val > 1.5:
+                            iaf_val = iaf_val / 100.0
+                        receita_por_criterio_real = receita_por_criterio_real * iaf_val
 
             delta_ideal = None
             if qtd_ideal_i is not None and qtd_hist_i is not None:
@@ -484,8 +492,9 @@ def render_comparativo_tab(tab_container) -> None:
                     subset_exibir = subset_exibir.copy()
                     urg_label = subset_exibir["Diferença"].apply(_delta_urgency_label)
                     subset_exibir["Urgência"] = urg_label.apply(lambda v: f"• {v}" if v else "")
+                    use_ratio_fmt = criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25")
                     styled = subset_exibir.style.format(
-                        {ratio_col: _format_ratio if criterio_key == "SalarioMapeado" else _format_brl},
+                        {ratio_col: _format_ratio if use_ratio_fmt else _format_brl},
                     )
                     styled = styled.applymap(
                         lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
@@ -493,8 +502,9 @@ def render_comparativo_tab(tab_container) -> None:
                     )
                     st.dataframe(styled, use_container_width=True)
                 else:
+                    use_ratio_fmt = criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25")
                     styled = subset_exibir.style.format(
-                        {ratio_col: _format_ratio if criterio_key == "SalarioMapeado" else _format_brl},
+                        {ratio_col: _format_ratio if use_ratio_fmt else _format_brl},
                     )
                     st.dataframe(styled, use_container_width=True)
 
@@ -510,8 +520,9 @@ def render_comparativo_tab(tab_container) -> None:
         pontos_df["Time Comercial Ideal Plot"] = pd.to_numeric(
             pontos_df["Time Comercial Ideal"], errors="coerce"
         )
+        use_ratio_fmt = criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25")
         pontos_df[ratio_col_fmt] = pontos_df[ratio_col].apply(
-            _format_ratio if criterio_key == "SalarioMapeado" else _format_brl
+            _format_ratio if use_ratio_fmt else _format_brl
         )
         pontos_df["Praca"] = pontos_df["Praca"].fillna("").astype(str)
         pontos_df = pontos_df.dropna(subset=["Time Comercial Real Plot", "Time Comercial Ideal Plot"])

@@ -160,6 +160,17 @@ def _coerce_numeric_series(series: pd.Series) -> pd.Series:
     return numeric
 
 
+def _normalize_iaf_series(values, index: pd.Index) -> pd.Series:
+    iaf = pd.to_numeric(values, errors="coerce")
+    if not isinstance(iaf, pd.Series):
+        iaf = pd.Series(iaf, index=index, dtype="float64")
+    iaf = iaf.replace([np.inf, -np.inf], np.nan)
+    mask_pct = iaf > 1.5
+    if mask_pct.any():
+        iaf.loc[mask_pct] = iaf.loc[mask_pct] / 100.0
+    return iaf
+
+
 def _estimate_prateleiras_from_area(
     area_total_val: float, estrutura_df: Optional[pd.DataFrame]
 ) -> Optional[float]:
@@ -454,6 +465,7 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
             "Faturamento/Hora",
             "%Retirada",
             "ReceitaTotalMes",
+            "%IAF25",
         ]
         cols = [c for c in ind_keep if c in fIndicadores.columns]
         group_col = key_col if key_col in fIndicadores.columns else "Loja"
@@ -478,6 +490,7 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         "ReceitaPorAux",
         "TotalMapeado",
         "SalarioMapeado",
+        "%IAF25",
     ]
     for extra_col in extra_numeric:
         if extra_col in df.columns:
@@ -636,7 +649,7 @@ def _apply_high_perf_cap(
     if receita is None or receita.empty:
         return y_series
     criterio_key = get_criterio_mapeado_key()
-    if criterio_key == "SalarioMapeado":
+    if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
         salario_map = pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce")
         if not isinstance(salario_map, pd.Series):
             salario_map = pd.Series(salario_map, index=train_df.index, dtype="float64")
@@ -645,7 +658,11 @@ def _apply_high_perf_cap(
             total_map = pd.Series(total_map, index=train_df.index, dtype="float64")
         salario_por_pessoa = salario_map / total_map.replace(0, np.nan)
         salario_por_pessoa = salario_por_pessoa.replace([np.inf, -np.inf], np.nan)
-        salario_ideal = (receita / anchor) * (1.0 + margem)
+        receita_base = receita
+        if criterio_key == "SalarioMapeadoIAF25":
+            iaf = _normalize_iaf_series(train_df.get("%IAF25"), train_df.index).fillna(1.0)
+            receita_base = receita_base * iaf
+        salario_ideal = (receita_base / anchor) * (1.0 + margem)
         cap = salario_ideal / salario_por_pessoa.replace(0, np.nan)
     else:
         cap = (receita / anchor) * (1.0 + margem)
@@ -1027,7 +1044,7 @@ def make_target(
 
     # Headcount ideal = receita esperada / receita por aux de referência
     criterio_key = get_criterio_mapeado_key()
-    if criterio_key == "SalarioMapeado":
+    if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
         salario_map = pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce")
         if not isinstance(salario_map, pd.Series):
             salario_map = pd.Series(salario_map, index=train_df.index, dtype="float64")
@@ -1036,7 +1053,11 @@ def make_target(
             total_map = pd.Series(total_map, index=train_df.index, dtype="float64")
         salario_por_pessoa = salario_map / total_map.replace(0, np.nan)
         salario_por_pessoa = salario_por_pessoa.replace([np.inf, -np.inf], np.nan)
-        salario_ideal = receita_base / max(anchor_rpa, 1e-6)
+        receita_ajustada = receita_base
+        if criterio_key == "SalarioMapeadoIAF25":
+            iaf = _normalize_iaf_series(train_df.get("%IAF25"), train_df.index).fillna(1.0)
+            receita_ajustada = receita_ajustada * iaf
+        salario_ideal = receita_ajustada / max(anchor_rpa, 1e-6)
         y_ideal = salario_ideal / salario_por_pessoa.replace(0, np.nan)
         y_ideal = y_ideal.fillna(y_hist)
     else:
@@ -1096,7 +1117,7 @@ def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.S
             horas = horas.where(horas > 0, np.nan).fillna(1.0)
         receita_base = faturamento_hora * horas * WEEKS_PER_MONTH
 
-    if criterio_key == "SalarioMapeado":
+    if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25"):
         salario_map = _ensure_series(pd.to_numeric(train_df.get("SalarioMapeado"), errors="coerce"))
         denom = salario_map.replace(0, np.nan)
     elif criterio_key == "TotalMapeado":
@@ -1109,6 +1130,9 @@ def _compute_receita_por_aux(train_df: pd.DataFrame, qtd_aux: pd.Series) -> pd.S
 
     if denom is not None:
         base = receita_base / denom
+        if criterio_key == "SalarioMapeadoIAF25":
+            iaf = _normalize_iaf_series(train_df.get("%IAF25"), train_df.index).fillna(1.0)
+            base = base * iaf
         base = base.replace([np.inf, -np.inf], np.nan)
         if base.notna().sum() >= 3:
             return base
@@ -1620,7 +1644,7 @@ def _blend_pred_with_cluster(
     if cluster_pred is None or not math.isfinite(cluster_pred):
         return float(pred_val), 0.0
     criterio_key = get_criterio_mapeado_key()
-    blend_scale = 1.0 if criterio_key == "SalarioMapeado" else 0.35
+    blend_scale = 1.0 if criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25") else 0.35
     peso = 0.35
     if is_large:
         peso = 0.60
