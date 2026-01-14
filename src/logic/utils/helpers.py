@@ -77,7 +77,7 @@ CRITERIO_MAPEADO_OPTIONS = {
 }
 MAPEADO_HELPER_TEXT = (
     "Mapeado abrange os cargos de auxiliares, lideres, caixas, "
-    "estagiarios&aprendizes, ASG e consultores de negocios."
+    "aprendizes, ASG e consultores de negocios."
 )
 
 

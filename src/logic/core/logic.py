@@ -18,6 +18,7 @@ from sklearn.model_selection import KFold, train_test_split
 import numpy as np
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
+from sklearn.ensemble import ExtraTreesRegressor
 try:
     from statsmodels.stats.outliers_influence import variance_inflation_factor  # type: ignore
 except ImportError:
@@ -607,10 +608,187 @@ FEATURE_COLUMNS = [
 CONT = ["Area Total","Qtd Caixas","Pedidos/Hora","Pedidos/Dia",
         "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva",
         "TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
+ESTOQUISTAS_FEATURE_BASE = ["ItensEstoque", "CustoEstoque"]
+ESTOQUISTAS_FEATURE_ENGINEERED = [
+    "CustoPorItem",
+    "ItensPorCusto",
+    "LogItensEstoque",
+    "LogCustoEstoque",
+    "ItensXCusto",
+]
+ESTOQUISTAS_FEATURE_INDICATORS = [
+    "BaseAtiva",
+    "Pedidos/Dia",
+    "Pedidos/Hora",
+    "Itens/Pedido",
+    "Faturamento/Hora",
+    "ReceitaTotalMes",
+    "%Retirada",
+    "%IAF25",
+]
+ESTOQUISTAS_FEATURE_COLUMNS = (
+    ESTOQUISTAS_FEATURE_BASE + ESTOQUISTAS_FEATURE_ENGINEERED + ESTOQUISTAS_FEATURE_INDICATORS
+)
 MODEL_ALGO_ORDER = ["catboost"]
 MODEL_ALGO_NAMES = {
     "catboost": "CatBoostRegressor",
 }
+
+
+def _coerce_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return series
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    s = series.astype(str).str.strip()
+    s = s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    return pd.to_numeric(s, errors="coerce")
+
+
+def prepare_estoquistas_training_dataframe(
+    dEstrutura: Optional[pd.DataFrame],
+    dPessoas: Optional[pd.DataFrame],
+    fIndicadores: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """Combina estrutura, pessoas e indicadores para treinar Estoquistas."""
+    if dEstrutura is None or dEstrutura.empty:
+        return pd.DataFrame()
+    if dPessoas is None or dPessoas.empty:
+        return pd.DataFrame()
+    if "Estoquistas" not in dPessoas.columns:
+        return pd.DataFrame()
+    dEstrutura = _ensure_loja_key(dEstrutura)
+    dPessoas = _ensure_loja_key(dPessoas)
+    fIndicadores = _ensure_loja_key(fIndicadores)
+    base = dEstrutura.copy()
+    key_col = "Loja_norm" if "Loja_norm" in base.columns else "Loja"
+    merge_key = key_col if key_col in dPessoas.columns else "Loja"
+    pessoas_cols = [merge_key, "Estoquistas"]
+    base = pd.merge(base, dPessoas[pessoas_cols], left_on=key_col, right_on=merge_key, how="inner")
+    if fIndicadores is not None and not fIndicadores.empty:
+        ind_cols = [c for c in ESTOQUISTAS_FEATURE_INDICATORS if c in fIndicadores.columns]
+        group_col = key_col if key_col in fIndicadores.columns else "Loja"
+        if ind_cols:
+            ind = fIndicadores.groupby(group_col, as_index=False)[ind_cols].mean()
+            base = pd.merge(base, ind, left_on=key_col, right_on=group_col, how="left")
+    for col in set(ESTOQUISTAS_FEATURE_BASE + ESTOQUISTAS_FEATURE_INDICATORS + ["Estoquistas"]):
+        if col in base.columns:
+            base[col] = _coerce_numeric_series(base[col])
+    if "ItensEstoque" in base.columns and "CustoEstoque" in base.columns:
+        items = base["ItensEstoque"].replace(0, np.nan)
+        cost = base["CustoEstoque"].replace(0, np.nan)
+        base["CustoPorItem"] = cost / items
+        base["ItensPorCusto"] = items / cost
+        base["LogItensEstoque"] = np.log1p(base["ItensEstoque"])
+        base["LogCustoEstoque"] = np.log1p(base["CustoEstoque"])
+        base["ItensXCusto"] = base["ItensEstoque"] * base["CustoEstoque"]
+    base = base[base["Estoquistas"].notna()]
+    return base
+
+
+def _build_estoquistas_feature_frame(
+    feature_row: Dict[str, object],
+    used_features: List[str],
+) -> pd.DataFrame:
+    row: Dict[str, float] = {}
+    for key in used_features:
+        row[key] = float("nan")
+    items = safe_float(feature_row.get("ItensEstoque"), float("nan"))
+    cost = safe_float(feature_row.get("CustoEstoque"), float("nan"))
+    if math.isfinite(items):
+        row["ItensEstoque"] = items
+    if math.isfinite(cost):
+        row["CustoEstoque"] = cost
+    for key in ESTOQUISTAS_FEATURE_INDICATORS:
+        if key in used_features:
+            val = safe_float(feature_row.get(key), float("nan"))
+            if math.isfinite(val):
+                row[key] = val
+    if "CustoPorItem" in used_features:
+        row["CustoPorItem"] = cost / items if math.isfinite(cost) and math.isfinite(items) and items != 0 else float("nan")
+    if "ItensPorCusto" in used_features:
+        row["ItensPorCusto"] = items / cost if math.isfinite(cost) and math.isfinite(items) and cost != 0 else float("nan")
+    if "LogItensEstoque" in used_features:
+        row["LogItensEstoque"] = math.log1p(items) if math.isfinite(items) and items >= 0 else float("nan")
+    if "LogCustoEstoque" in used_features:
+        row["LogCustoEstoque"] = math.log1p(cost) if math.isfinite(cost) and cost >= 0 else float("nan")
+    if "ItensXCusto" in used_features:
+        row["ItensXCusto"] = items * cost if math.isfinite(items) and math.isfinite(cost) else float("nan")
+    return pd.DataFrame([row], columns=used_features)
+
+
+def _train_estoquistas_extratrees(train_df: pd.DataFrame) -> Dict[str, object]:
+    if train_df is None or train_df.empty:
+        return {"error": "Sem dados para treino de Estoquistas."}
+    if "Estoquistas" not in train_df.columns:
+        return {"error": "Coluna 'Estoquistas' ausente no treino."}
+    used_features = [c for c in ESTOQUISTAS_FEATURE_COLUMNS if c in train_df.columns]
+    if not used_features:
+        return {"error": "Sem features validas para Estoquistas."}
+    X_full = train_df[used_features].apply(_coerce_numeric_series)
+    y_full = _coerce_numeric_series(train_df["Estoquistas"])
+    mask = y_full.notna()
+    X_full = X_full.loc[mask]
+    y_full = y_full.loc[mask]
+    if X_full.empty:
+        return {"error": "Sem linhas validas para treino de Estoquistas."}
+    params = {
+        "n_estimators": 300,
+        "max_depth": 10,
+        "min_samples_split": 2,
+        "min_samples_leaf": 1,
+        "max_features": "sqrt",
+    }
+    model = ExtraTreesRegressor(random_state=42, n_jobs=-1, **params)
+    pipe = Pipeline(steps=[("imputer", SimpleImputer(strategy="median")), ("model", model)])
+    metrics: Dict[str, float] = {}
+    if len(X_full) >= 5:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_full, y_full, test_size=0.2, random_state=42
+        )
+        pipe.fit(X_train, y_train)
+        preds = pipe.predict(X_test)
+        metrics = {
+            "r2": r2(y_test, preds),
+            "mae": mae(y_test, preds),
+            "mape_pct": mape_safe(y_test, preds) * 100.0,
+        }
+    pipe.fit(X_full, y_full)
+    return {
+        "model": pipe,
+        "model_name": "ExtraTreesRegressor",
+        "params": params,
+        "metrics": metrics,
+        "features": used_features,
+        "rows": int(len(X_full)),
+    }
+
+
+@st.cache_resource(show_spinner=False)
+def _train_estoquistas_cached(train_df: pd.DataFrame, cache_version: int = 1) -> Dict[str, object]:
+    return _train_estoquistas_extratrees(train_df)
+
+
+def predict_estoquistas_extratrees(
+    train_df: pd.DataFrame,
+    feature_row: Dict[str, object],
+    cache_version: int = 1,
+) -> Dict[str, object]:
+    bundle = _train_estoquistas_cached(train_df, cache_version=cache_version)
+    if bundle.get("error"):
+        return bundle
+    model = bundle.get("model")
+    used_features = bundle.get("features") or []
+    if model is None or not used_features:
+        return {"error": "Modelo de Estoquistas indisponivel."}
+    row_df = _build_estoquistas_feature_frame(feature_row, used_features)
+    try:
+        pred = float(model.predict(row_df)[0])
+    except Exception as exc:
+        return {"error": f"Erro ao prever Estoquistas: {exc}"}
+    output = dict(bundle)
+    output["pred"] = pred
+    return output
 
 
 def _get_high_perf_anchor(train_df: pd.DataFrame, q: float = 0.75) -> Optional[float]:
