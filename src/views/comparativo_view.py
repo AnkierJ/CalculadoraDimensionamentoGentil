@@ -501,7 +501,7 @@ def render_comparativo_tab(tab_container) -> None:
                     styled = subset_exibir.style.format(
                         {ratio_col: _format_ratio if use_ratio_fmt else _format_brl},
                     )
-                    styled = styled.applymap(
+                    styled = styled.map(
                         lambda v: f"color: {_delta_urgency_color(v)}; font-weight: 600;",
                         subset=["Urgência"],
                     )

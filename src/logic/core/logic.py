@@ -5,6 +5,7 @@
 # =============================================================================
 import math
 import unicodedata
+import time
 from sklearn.cluster import KMeans
 import streamlit as st
 from typing import Dict, List, Tuple, Optional, Union
@@ -23,7 +24,12 @@ try:
     from statsmodels.stats.outliers_influence import variance_inflation_factor  # type: ignore
 except ImportError:
     variance_inflation_factor = None
-from ..models.model_catboost import CatBoostQuantileModel, predict_catboost, train_catboost_model
+from ..models.model_catboost import (
+    CATBOOST_PARAM_VERSION,
+    CatBoostQuantileModel,
+    predict_catboost,
+    train_catboost_model,
+)
 from ..models.model_fila import (
     DEFAULT_OCUPACAO_ALVO,
     diagnosticar_fila,
@@ -80,12 +86,32 @@ from .clusters import treinar_kmeans, atribuir_cluster
 DEFAULT_ABSENTEISMO   = 0.08        # férias + faltas + treinamentos (0–1)
 DEFAULT_SLA_BUFFER    = 0.05        # folga extra p/ pico/SLA além da margem
 WEEKS_PER_MONTH = 4.33
+
+
+def _normalize_horas_semanais(horas_disp: float) -> float:
+    """Normaliza horas informadas para carga semanal por colaborador."""
+    try:
+        horas = float(horas_disp)
+    except Exception:
+        return 1e-6
+    if horas > 200:
+        horas = horas / WEEKS_PER_MONTH
+    return max(horas, 1e-6)
 # =============================================================================
 # Helpers importados de utils.helpers
 # =============================================================================
 # =============================================================================
 # Helpers compartilhados (views)
 # =============================================================================
+def _dias_semana_from_mes(dias_mes: float, fallback: float = 6.0) -> float:
+    dias_mes_val = safe_float(dias_mes, 0.0)
+    if dias_mes_val <= 0 or not math.isfinite(dias_mes_val):
+        return float(fallback)
+    dias_semana = dias_mes_val / float(WEEKS_PER_MONTH)
+    if not math.isfinite(dias_semana) or dias_semana <= 0:
+        return float(fallback)
+    return float(max(1.0, min(7.0, dias_semana)))
+
 def _preds_for_loja(
     bundle: Optional[Dict[str, object]],
     train_df: pd.DataFrame,
@@ -281,7 +307,10 @@ def estimate_fluxo_medio_indicadores(
     dias = _safe_value(dias_operacionais)
     if dias <= 0:
         dias = 6.0
-    dias = max(1.0, min(7.0, dias))
+    if dias > 7:
+        dias = _dias_semana_from_mes(dias, 6.0)
+    else:
+        dias = max(1.0, min(7.0, dias))
     horas_semanais = _safe_value(horas_operacionais_semanais)
     if horas_semanais <= 0:
         horas_semanais = dias * 10.0
@@ -328,7 +357,10 @@ def estimate_pedidos_por_hora(
     dias = safe_float(dias_operacionais_semana, 0.0)
     if dias <= 0:
         dias = 6.0
-    dias = max(1.0, min(7.0, dias))
+    if dias > 7:
+        dias = _dias_semana_from_mes(dias, 6.0)
+    else:
+        dias = max(1.0, min(7.0, dias))
     if base <= 0 and horas_semanais > 0:
         pedidos_dia = safe_float(indicadores.get("Pedidos/Dia"), 0.0)
         if pedidos_dia > 0:
@@ -359,7 +391,10 @@ def estimate_process_frequencies_from_indicadores(
     dias = _safe_positive(dias_operacionais)
     if dias <= 0:
         dias = 6.0
-    dias = max(1.0, min(7.0, dias))
+    if dias > 7:
+        dias = _dias_semana_from_mes(dias, 6.0)
+    else:
+        dias = max(1.0, min(7.0, dias))
     pedidos_semana = _safe_positive(pedidos_semana)
     if pedidos_semana <= 0:
         pedidos_semana = 0.0
@@ -418,7 +453,17 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
     fIndicadores = _ensure_loja_key(fIndicadores)
     df = dEstrutura.copy()
     key_col = "Loja_norm" if "Loja_norm" in df.columns else "Loja"
-    if "DiasOperacionais" in df.columns:
+    if "DiasOperacionaisMes" in df.columns:
+        dias_mes = pd.to_numeric(df["DiasOperacionaisMes"], errors="coerce")
+        if dias_mes.notna().any():
+            dias_semana = (dias_mes / float(WEEKS_PER_MONTH)).clip(1, 7)
+            df["DiasOperacionais"] = dias_semana.fillna(6.0)
+        elif "DiasOperacionais" in df.columns:
+            df["DiasOperacionais"] = pd.to_numeric(df["DiasOperacionais"], errors="coerce").clip(1, 7)
+            df["DiasOperacionais"] = df["DiasOperacionais"].fillna(6.0)
+        else:
+            df["DiasOperacionais"] = 6.0
+    elif "DiasOperacionais" in df.columns:
         df["DiasOperacionais"] = pd.to_numeric(df["DiasOperacionais"], errors="coerce").clip(1, 7)
         df["DiasOperacionais"] = df["DiasOperacionais"].fillna(6.0)
     else:
@@ -912,9 +957,16 @@ def _prepare_model_data(
     if train_df is None or train_df.empty:
         return None
     used_features = [c for c in FEATURE_COLUMNS if c in train_df.columns]
+    criterio_key = get_criterio_mapeado_key()
+    if criterio_key == "SalarioMapeadoIAF25":
+        for col in ["%IAF25", "SalarioMapeado", "TotalMapeado"]:
+            if col in train_df.columns and col not in used_features:
+                used_features.append(col)
     if not used_features:
         return None
     preserve_cols = ["BaseAtiva", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora"]
+    if criterio_key == "SalarioMapeadoIAF25":
+        preserve_cols.extend(["%IAF25", "SalarioMapeado", "TotalMapeado"])
     used_features = drop_high_correlation(
         train_df,
         used_features,
@@ -934,6 +986,10 @@ def _prepare_model_data(
     X, y = X.loc[mask_valid], y.loc[mask_valid]
     if X.empty:
         return None
+    if criterio_key == "SalarioMapeadoIAF25" and y.notna().sum() >= 10:
+        q_low, q_high = y.quantile([0.02, 0.98])
+        if pd.notna(q_low) and pd.notna(q_high) and q_low < q_high:
+            y = y.clip(lower=float(q_low), upper=float(q_high))
     X, used_features = _reduce_features_by_mi(X, y, used_features)
     numeric_cols, categorical_cols = _infer_feature_types(X, used_features)
     X.attrs["numeric_features"] = numeric_cols
@@ -951,6 +1007,8 @@ def _prepare_model_data(
                 ref = positivos.mean() or 1.0
             fator = (receita_por_aux / max(ref, 1e-6)).clip(lower=0.4, upper=2.5).fillna(1.0)
             sample_weights = fator.reindex(base_weights.index, fill_value=1.0)
+            if criterio_key == "SalarioMapeadoIAF25":
+                sample_weights = sample_weights.clip(lower=0.5, upper=2.0)
     return X, y, used_features, sample_weights
 def drop_high_correlation(
     df: pd.DataFrame,
@@ -1073,6 +1131,7 @@ def train_auxiliares_model(
         numeric_cols, categorical_cols = _infer_feature_types(X, used_features)
     cat_cardinality = getattr(X_full, "attrs", {}).get("categorical_cardinality", {})
     if algo == "catboost":
+        loss_mid = "RMSE"
         return train_catboost_model(
             X=X,
             y=y,
@@ -1080,6 +1139,7 @@ def train_auxiliares_model(
             numeric_cols=numeric_cols or [],
             categorical_cols=categorical_cols or [],
             sample_weights=sample_weights,
+            loss_mid=loss_mid,
         )
     raise ValueError(f"Algoritmo '{algo}' não suportado.")
 def _determine_test_fraction(n_samples: int, desired: float) -> float:
@@ -1185,7 +1245,7 @@ def make_target(
         except Exception:
             anchor_q = 0.60
     anchor_q = max(0.1, min(0.95, float(anchor_q)))
-    horas_disp_safe = max(float(horas_disp), 1e-6)
+    horas_disp_safe = _normalize_horas_semanais(horas_disp)
     receita_raw = train_df.get("ReceitaTotalMes")
     receita_mes = pd.to_numeric(
         receita_raw if isinstance(receita_raw, pd.Series) else pd.Series(receita_raw, index=train_df.index),
@@ -1525,6 +1585,27 @@ def evaluate_model_cv(
     if algo is None:
         return metrics_map
     return metrics_map.get(algo_name, {})
+
+
+@st.cache_data(show_spinner=False)
+def _evaluate_model_cv_cached(
+    train_df: pd.DataFrame,
+    mode: str,
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: Optional[float],
+    cache_bust: int = 0,
+) -> Dict[str, object]:
+    _ = cache_bust
+    return evaluate_model_cv(
+        train_df,
+        n_splits=5,
+        mode=mode,
+        horas_disp=horas_disp,
+        margem=margem,
+        anchor_quantile=anchor_quantile,
+        algo=None,
+    )
 def predict_with_uncertainty(
     train_df: pd.DataFrame,
     feature_row: Dict[str, object],
@@ -1892,11 +1973,16 @@ def infer_dias_operacionais(row: Optional[pd.Series], fallback: float = 6.0) -> 
     """Obtém o número de dias/semana operados pela loja."""
     if row is None or len(row) == 0:
         return fallback
+    dias_mes = row.get("DiasOperacionaisMes")
+    if dias_mes is not None and not (isinstance(dias_mes, float) and math.isnan(dias_mes)):
+        return _dias_semana_from_mes(dias_mes, fallback)
     dias = row.get("DiasOperacionais", fallback)
     try:
         dias_val = float(dias)
         if dias_val <= 0 or math.isnan(dias_val):
             return fallback
+        if dias_val > 7:
+            return _dias_semana_from_mes(dias_val, fallback)
         return float(max(1.0, min(7.0, dias_val)))
     except Exception:
         return fallback
@@ -2132,11 +2218,9 @@ def calcular_media_horas_operacionais(
                 horas = float(horas_val)
         if horas is None:
             continue
-        dias = safe_float(row.get("DiasOperacionais"), 0.0)
+        dias_semana = infer_dias_operacionais(row, 6.0)
         if horas > 24:
-            if dias <= 0:
-                dias = 6.0
-            horas = horas / max(1.0, min(7.0, dias))
+            horas = horas / max(1.0, float(dias_semana))
         if 0 < horas <= 24:
             horas_list.append(float(horas))
     if not horas_list:
@@ -2248,6 +2332,7 @@ ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
     "dEstrutura": {
         "DiasOperacionais/Mì": "DiasOperacionaisMes",
         "DiasOperacionais/Mês": "DiasOperacionaisMes",
+        "DiasOperacionais/Mês": "DiasOperacionaisMes",
         "DiasOperacionais/Mes": "DiasOperacionaisMes",
     },
     "dPessoas": {
@@ -2285,6 +2370,207 @@ def _load_with_version(path: str, schema_name: str) -> pd.DataFrame:
     except FileNotFoundError:
         mtime = 0.0
     return _load_csv_cached(path, schema_name, mtime)
+
+
+def _parse_hour_value(value: object) -> Optional[int]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit() and len(text) in (3, 4):
+        text = text.zfill(4)
+        text = f"{text[:2]}:{text[2:]}"
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    hour = int(parsed.hour)
+    if 0 <= hour <= 23:
+        return hour
+    return None
+
+
+def _derive_faturamento_orders(faturamento_df: pd.DataFrame) -> pd.DataFrame:
+    if faturamento_df is None or faturamento_df.empty or "Loja" not in faturamento_df.columns:
+        return pd.DataFrame()
+    df = faturamento_df.copy()
+    df["Loja"] = df["Loja"].astype(str).str.strip()
+    df = df[df["Loja"] != ""]
+    if df.empty:
+        return pd.DataFrame()
+    pedidos_count = None
+    if "CodPedido" in df.columns:
+        cod = pd.to_numeric(df["CodPedido"], errors="coerce")
+        df["_cod"] = cod
+        missing = cod.isna()
+        if missing.any():
+            df.loc[missing, "_cod"] = np.arange(len(df))[missing]
+        pedidos_count = pd.Series(1.0, index=df.index, dtype="float64")
+    else:
+        df["_cod"] = np.arange(len(df))
+        if "Boletos" in df.columns:
+            pedidos_count = pd.to_numeric(df["Boletos"], errors="coerce")
+        elif "Pedidos" in df.columns:
+            pedidos_count = pd.to_numeric(df["Pedidos"], errors="coerce")
+        else:
+            pedidos_count = pd.Series(1.0, index=df.index, dtype="float64")
+    df["PedidosCount"] = pedidos_count.fillna(0.0)
+    agg_map: Dict[str, str] = {}
+    if "Faturamento" in df.columns:
+        agg_map["Faturamento"] = "sum"
+    elif "FaturamentoBruto" in df.columns:
+        df["Faturamento"] = pd.to_numeric(df["FaturamentoBruto"], errors="coerce")
+        agg_map["Faturamento"] = "sum"
+    if "Itens" in df.columns:
+        agg_map["Itens"] = "sum"
+    if "Retirada" in df.columns:
+        agg_map["Retirada"] = "max"
+    if "DataPedido" in df.columns:
+        agg_map["DataPedido"] = "min"
+    elif "Data" in df.columns:
+        df["DataPedido"] = df["Data"]
+        agg_map["DataPedido"] = "min"
+    if "HoraPedido" in df.columns:
+        agg_map["HoraPedido"] = "min"
+    elif "Hora" in df.columns:
+        df["HoraPedido"] = df["Hora"]
+        agg_map["HoraPedido"] = "min"
+    agg_map["PedidosCount"] = "sum"
+    orders = df.groupby(["Loja", "_cod"], as_index=False).agg(agg_map)
+    return orders
+
+
+def derive_indicadores_from_faturamento(
+    faturamento_df: Optional[pd.DataFrame],
+    estrutura_df: Optional[pd.DataFrame] = None,
+    default_horas_dia: float = 10.0,
+    meses_ano: int = 12,
+) -> pd.DataFrame:
+    """Deriva indicadores operacionais a partir de fFaturamento2."""
+    if faturamento_df is None or faturamento_df.empty:
+        return pd.DataFrame()
+    orders = _derive_faturamento_orders(faturamento_df)
+    if orders.empty:
+        return pd.DataFrame()
+    lojas = sorted(orders["Loja"].dropna().astype(str).str.strip().unique().tolist())
+    if not lojas:
+        return pd.DataFrame()
+    res = pd.DataFrame(index=pd.Index(lojas, name="Loja"))
+    res["Pedidos"] = orders.groupby("Loja")["PedidosCount"].sum()
+    if "Faturamento" in orders.columns:
+        receita_total = orders.groupby("Loja")["Faturamento"].sum()
+    else:
+        receita_total = pd.Series(0.0, index=res.index, dtype="float64")
+    meses_norm = int(max(1, meses_ano))
+    res["ReceitaTotalMes"] = receita_total / float(meses_norm)
+    if "Itens" in orders.columns:
+        res["ItensTotal"] = orders.groupby("Loja")["Itens"].sum()
+    else:
+        res["ItensTotal"] = 0.0
+    if "Retirada" in orders.columns:
+        retirada_series = orders["Retirada"].astype("boolean").fillna(False)
+        res["RetiradaTotal"] = retirada_series.groupby(orders["Loja"]).sum().astype(float)
+    else:
+        res["RetiradaTotal"] = 0.0
+    dias_series = pd.Series(0.0, index=res.index, dtype="float64")
+    if "DataPedido" in orders.columns:
+        dias = pd.to_datetime(orders["DataPedido"], errors="coerce").dt.date
+        dias_df = pd.DataFrame({"Loja": orders["Loja"], "_data": dias})
+        dias_df = dias_df.dropna(subset=["_data"])
+        if not dias_df.empty:
+            dias_count = dias_df.groupby("Loja")["_data"].nunique().astype(float)
+            dias_series = dias_count
+    horas_series = pd.Series(0.0, index=res.index, dtype="float64")
+    if "HoraPedido" in orders.columns:
+        horas = orders["HoraPedido"].apply(_parse_hour_value)
+        horas_df = pd.DataFrame({"Loja": orders["Loja"], "_hora": horas})
+        if "DataPedido" in orders.columns:
+            dias = pd.to_datetime(orders["DataPedido"], errors="coerce").dt.date
+            horas_df["_data"] = dias
+            horas_df = horas_df.dropna(subset=["_hora", "_data"])
+            if not horas_df.empty:
+                horas_series = (
+                    horas_df.groupby("Loja")[["_data", "_hora"]]
+                    .apply(lambda g: g.drop_duplicates().shape[0])
+                    .astype(float)
+                )
+        else:
+            horas_df = horas_df.dropna(subset=["_hora"])
+            if not horas_df.empty:
+                horas_series = horas_df.groupby("Loja")["_hora"].nunique().astype(float)
+    horas_dia_padrao = float(calcular_media_horas_operacionais(estrutura_df, default_horas_dia))
+    horas_dia_padrao = max(1.0, horas_dia_padrao)
+    dias_total = dias_series.reindex(res.index).fillna(0.0)
+    dias_total = dias_total.where(dias_total > 0, float(365))
+    dias_total = dias_total.where(dias_total >= 40.0, float(365))
+    horas_total = horas_series.reindex(res.index).fillna(0.0)
+    horas_fallback = dias_total * horas_dia_padrao
+    horas_total = horas_total.where(horas_total > 0, horas_fallback)
+    pedidos = res["Pedidos"].fillna(0.0).astype(float)
+    receita = res["ReceitaTotalMes"].fillna(0.0).astype(float)
+    itens_total = res["ItensTotal"].fillna(0.0).astype(float)
+    retirada_total = res["RetiradaTotal"].fillna(0.0).astype(float)
+    res["Pedidos/Dia"] = (pedidos / dias_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["Pedidos/Hora"] = (pedidos / horas_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["Faturamento/Hora"] = (receita / horas_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["Itens/Pedido"] = (itens_total / pedidos.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["%Retirada"] = (
+        (retirada_total / pedidos.replace(0, np.nan)) * 100.0
+    ).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res = res.reset_index()
+    res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal", "RetiradaTotal"] if c in res.columns])
+    return res
+
+
+def merge_indicadores_from_faturamento(
+    indicadores_df: Optional[pd.DataFrame],
+    faturamento_df: Optional[pd.DataFrame],
+    estrutura_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Mescla indicadores derivados do fFaturamento2 com a base fIndicadores."""
+    derived = derive_indicadores_from_faturamento(faturamento_df, estrutura_df=estrutura_df)
+    if derived is None or derived.empty:
+        return indicadores_df if indicadores_df is not None else create_empty_from_schema(get_schema_fIndicadores())
+    if indicadores_df is None or indicadores_df.empty:
+        base = create_empty_from_schema(get_schema_fIndicadores())
+    else:
+        base = indicadores_df.copy()
+    if "Loja" not in base.columns:
+        base["Loja"] = ""
+    base = _ensure_loja_key(base)
+    derived = _ensure_loja_key(derived)
+    merged = base.merge(derived, on="Loja_norm", how="outer", suffixes=("", "_ffat"))
+    if "Loja" in merged.columns and "Loja_ffat" in merged.columns:
+        merged["Loja"] = merged["Loja"].combine_first(merged["Loja_ffat"])
+        merged = merged.drop(columns=["Loja_ffat"])
+    cols_to_update = [
+        "ReceitaTotalMes",
+        "Pedidos/Dia",
+        "Pedidos/Hora",
+        "Faturamento/Hora",
+        "Itens/Pedido",
+        "%Retirada",
+    ]
+    for col in cols_to_update:
+        derived_col = f"{col}_ffat"
+        if derived_col not in merged.columns:
+            continue
+        if col in merged.columns:
+            merged[col] = merged[derived_col].combine_first(merged[col])
+        else:
+            merged[col] = merged[derived_col]
+        merged = merged.drop(columns=[derived_col])
+    if "Loja_norm" in merged.columns:
+        merged = merged.drop(columns=["Loja_norm"])
+    if "BaseAtiva" in merged.columns and "ReceitaTotalMes" in merged.columns:
+        base_ativa = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
+        receita = pd.to_numeric(merged["ReceitaTotalMes"], errors="coerce")
+        reais_por_ativo = (receita / base_ativa.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        if "ReaisPorAtivo" in merged.columns:
+            merged["ReaisPorAtivo"] = merged["ReaisPorAtivo"].combine_first(reais_por_ativo)
+        else:
+            merged["ReaisPorAtivo"] = reais_por_ativo
+    return merged
 # =============================================================================
 # Uploads e sessões do app
 # =============================================================================
@@ -2292,17 +2578,26 @@ def apply_operacional_defaults_from_lookup(row: Dict[str, object]) -> None:
     """Atualiza valores padrão de dias/horas operacionais no session_state a partir de um lookup."""
     if not row:
         return
-    dias_lookup = safe_float(row.get("DiasOperacionais"), 0.0)
-    if dias_lookup and dias_lookup > 0:
-        dias_norm = int(max(1, min(7, round(dias_lookup))))
-        st.session_state["dias_operacionais_loja_form"] = dias_norm
-        st.session_state["dias_operacionais_semana"] = dias_norm
+    dias_mes_lookup = safe_float(get_lookup(row, "DiasOperacionaisMes"), 0.0)
+    dias_semana_lookup = safe_float(get_lookup(row, "DiasOperacionais"), 0.0)
+    dias_semana = None
+    if dias_mes_lookup > 0:
+        dias_semana = _dias_semana_from_mes(dias_mes_lookup, 6.0)
+        st.session_state["dias_operacionais_mes"] = float(dias_mes_lookup)
+    elif dias_semana_lookup > 0:
+        dias_semana = float(max(1.0, min(7.0, round(dias_semana_lookup))))
+        st.session_state["dias_operacionais_mes"] = float(dias_semana) * float(WEEKS_PER_MONTH)
+    if dias_semana is not None:
+        st.session_state["dias_operacionais_loja_form"] = dias_semana
+        st.session_state["dias_operacionais_semana"] = dias_semana
     horas_lookup = safe_float(row.get("HorasOperacionais"), 0.0)
     if horas_lookup and horas_lookup > 0:
-        dias_ref = int(st.session_state.get("dias_operacionais_loja_form", 6))
-        horas_semanais = horas_lookup * dias_ref if horas_lookup <= 24 else horas_lookup
-        st.session_state["horas_loja_config"] = horas_semanais
-        st.session_state["horas_operacionais_form"] = horas_semanais
+        dias_ref = float(st.session_state.get("dias_operacionais_semana", 6.0))
+        horas_dia = float(horas_lookup)
+        if horas_dia > 24 and dias_ref > 0:
+            horas_dia = horas_dia / max(1.0, dias_ref)
+        st.session_state["horas_loja_config"] = horas_dia
+        st.session_state["horas_operacionais_form"] = horas_dia
 def append_and_dedup(base: pd.DataFrame, new: pd.DataFrame, subset_cols: List[str]) -> pd.DataFrame:
     """Acrescenta linhas e remove duplicidades com base em colunas chave."""
     if base is None or base.empty:
@@ -2325,6 +2620,13 @@ def render_append(nome: str, schema_fn, subset_cols):
             st.session_state[nome] = append_and_dedup(st.session_state[nome], df_up, subset_cols)
             if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
+            if nome in ("fIndicadores", "fFaturamento2", "dEstrutura"):
+                st.session_state["fIndicadores"] = merge_indicadores_from_faturamento(
+                    st.session_state.get("fIndicadores"),
+                    st.session_state.get("fFaturamento2"),
+                    st.session_state.get("dEstrutura"),
+                )
+            st.session_state["_data_version"] = (time.time(),)
             st.success(f"{nome} atualizado. Linhas totais: {len(st.session_state[nome])}")
         else:
             st.error("; ".join(errs))
@@ -2566,6 +2868,7 @@ def gerar_resultados_modelos(
     apply_cluster_blend: bool = True,
     compute_metrics: bool = True,
     skip_cap_cols: Optional[List[str]] = None,
+    metrics_cache_bust: Optional[int] = None,
 ) -> Tuple[List[Dict[str, object]], Dict[str, str]]:
     models = (model_bundle or {}).get("models", {}) if model_bundle else {}
     model_errors = dict((model_bundle or {}).get("errors", {})) if model_bundle else {}
@@ -2600,14 +2903,16 @@ def gerar_resultados_modelos(
         return resultados_stub, model_errors
     metrics_map: Dict[str, Dict[str, float]] = {}
     if compute_metrics:
-        metrics_map = evaluate_model_cv(
+        cache_bust = metrics_cache_bust
+        if cache_bust is None:
+            cache_bust = CATBOOST_PARAM_VERSION
+        metrics_map = _evaluate_model_cv_cached(
             train_df,
-            n_splits=5,
             mode=ref_mode,
             horas_disp=horas_disp,
             margem=margem,
             anchor_quantile=anchor_quantile,
-            algo=None,
+            cache_bust=int(cache_bust),
         )
     resultados: List[Dict[str, object]] = []
     for key in algo_sequence:
@@ -2715,6 +3020,7 @@ def preparar_contexto_operacional(
     dias_operacionais_em_uso: int,
     dias_operacionais_ativos: int,
     horas_loja_config: float,
+    dias_operacionais_mes: Optional[float] = None,
 ) -> Tuple[float, int]:
     row_horas: Dict[str, object] = {}
     estrutura_row, estrutura_match = _get_loja_row(estrutura_df, loja_nome_alvo)
@@ -2735,6 +3041,8 @@ def preparar_contexto_operacional(
     else:
         use_loja_dados = has_row_data
     row_horas["DiasOperacionais"] = dias_operacionais_em_uso
+    if dias_operacionais_mes and dias_operacionais_mes > 0:
+        row_horas["DiasOperacionaisMes"] = float(dias_operacionais_mes)
     horas_loja_manual = float(horas_loja_config)
     if horas_loja_manual <= 24:
         horas_loja_manual = horas_loja_manual * dias_operacionais_ativos

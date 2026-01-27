@@ -2,6 +2,7 @@
 # Imports
 # =============================================================================
 import math
+import zlib
 import html
 import unicodedata
 from pathlib import Path
@@ -17,6 +18,7 @@ from src.logic.core.logic import (
     DEFAULT_OCUPACAO_ALVO,
     DEFAULT_ABSENTEISMO,
     MODEL_ALGO_NAMES,
+    WEEKS_PER_MONTH,
     _format_interval_value,
     _format_queue_diag,
     _metric_has_value,
@@ -47,7 +49,7 @@ from src.logic.core.logic import (
     predict_estoquistas_extratrees,
 )
 from src.logic.data.buscaDeLojas import _get_loja_row
-from src.logic.models.model_catboost import get_catboost_feature_importance
+from src.logic.models.model_catboost import CATBOOST_PARAM_VERSION, get_catboost_feature_importance
 from src.logic.utils.helpers import (
     _norm_code,
     _standardize_row,
@@ -142,10 +144,6 @@ def _format_estoquistas_helper_text(info: Optional[Dict[str, object]]) -> str:
     if info.get("error"):
         return str(info.get("error"))
     parts: List[str] = [f"Modelo: {info.get('model_name', 'ExtraTreesRegressor')}"]
-    params = info.get("params") or {}
-    if params:
-        param_bits = [f"{k}={v}" for k, v in params.items()]
-        parts.append("Params: " + ", ".join(param_bits))
     metrics = info.get("metrics") or {}
     metric_bits = []
     r2_val = metrics.get("r2")
@@ -657,6 +655,27 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         df_ind = st.session_state.get("fIndicadores")
         df_estrutura = st.session_state.get("dEstrutura")
         df_pessoas = st.session_state.get("dPessoas")
+        data_version = st.session_state.get("_data_version")
+        if (
+            st.session_state.get("lookup_found")
+            and st.session_state.get("lookup_loja_nome")
+            and data_version
+            and st.session_state.get("_lookup_data_version") != data_version
+        ):
+            loja_refresh = str(st.session_state.get("lookup_loja_nome", "")).strip()
+            indicator_row, _ = _get_loja_row(df_ind, loja_refresh) if df_ind is not None else ({}, False)
+            estrutura_row, _ = _get_loja_row(df_estrutura, loja_refresh) if df_estrutura is not None else ({}, False)
+            pessoas_row, _ = _get_loja_row(df_pessoas, loja_refresh) if df_pessoas is not None else ({}, False)
+            combined: Dict[str, object] = {}
+            if estrutura_row:
+                combined.update(estrutura_row)
+            if indicator_row:
+                combined.update(indicator_row)
+            if pessoas_row:
+                combined.update(pessoas_row)
+            if combined:
+                st.session_state["lookup_row"] = _standardize_row(combined)
+                st.session_state["_lookup_data_version"] = data_version
         if lookup_field in ("BCPS", "SAP"):
             with col_lookup[1]:
                 lookup_code = st.text_input(
@@ -748,6 +767,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     if combined:
                         st.session_state["lookup_found"] = True
                         st.session_state["lookup_row"] = _standardize_row(combined)
+                        if data_version:
+                            st.session_state["_lookup_data_version"] = data_version
                         st.session_state["absenteismo_input"] = _compute_absenteismo_prefill(st.session_state.get("lookup_row", {}))
                         apply_operacional_defaults_from_lookup(st.session_state["lookup_row"])
                         # Reseta frequencias simuladas ao trocar de loja para permitir novo prefill automatico.
@@ -796,7 +817,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     "Horas contratuais (h/sem)",
                     min_value=5.0,
                     value=44.0,
-                    step=1.0,
+                    step=0.5,
                     format="%.1f",
                     help="Carga semanal prevista em contrato para cada auxiliar, antes de qualquer perda operacional.",
                 )
@@ -805,8 +826,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     horas_disp = horas_disp_input / 4.33
                     st.caption(f"Valor informado parece mensal. Convertido para {horas_disp:.1f} h/semana.")
                 horas_loja_config_raw = safe_float(
-                    st.session_state.get("horas_operacionais_form", st.session_state.get("horas_loja_config", 60.0)),
-                    60.0,
+                    st.session_state.get("horas_operacionais_form", st.session_state.get("horas_loja_config", 10.0)),
+                    10.0,
                 )
                 horas_loja_config = horas_loja_config_raw
             with col2:
@@ -830,25 +851,44 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     format="%.2f",
                     help="Percentual único que cobre monotonia, picos/SLA e margem tática. Quanto maior, mais folga no dimensionamento.",
                 )
-            dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
-            dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
+            dias_operacionais_mes = safe_float(st.session_state.get("dias_operacionais_mes"), 0.0)
+            dias_operacionais_semana = safe_float(
+                st.session_state.get("dias_operacionais_semana", st.session_state.get("dias_operacionais_loja_form", 6.0)),
+                6.0,
+            )
+            if dias_operacionais_mes > 0:
+                dias_operacionais_semana = dias_operacionais_mes / float(WEEKS_PER_MONTH)
+            dias_operacionais_semana = max(1.0, min(7.0, float(dias_operacionais_semana)))
             if horas_loja_config <= 24:
                 horas_loja_config = horas_loja_config * dias_operacionais_semana
 
             st.session_state["horas_disp_semanais"] = horas_disp
             st.session_state["horas_loja_config"] = horas_loja_config
             st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+            if dias_operacionais_mes <= 0:
+                st.session_state["dias_operacionais_mes"] = float(dias_operacionais_semana) * float(WEEKS_PER_MONTH)
             st.session_state["folga_operacional"] = float(folga_operacional)
         else:
             horas_disp = 44.0
-            horas_loja_config = float(st.session_state.get("horas_loja_config", 60.0))
+            horas_loja_config = float(st.session_state.get("horas_loja_config", 10.0))
             absenteismo = float(DEFAULT_ABSENTEISMO)
             folga_operacional = 0.15
 
-        dias_operacionais_semana = int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6)))
-        dias_operacionais_semana = max(1, min(7, dias_operacionais_semana))
+        dias_operacionais_mes = safe_float(st.session_state.get("dias_operacionais_mes"), 0.0)
+        dias_operacionais_semana = safe_float(
+            st.session_state.get("dias_operacionais_semana", st.session_state.get("dias_operacionais_loja_form", 6.0)),
+            6.0,
+        )
+        if dias_operacionais_mes > 0:
+            dias_operacionais_semana = dias_operacionais_mes / float(WEEKS_PER_MONTH)
+        dias_operacionais_semana = max(1.0, min(7.0, float(dias_operacionais_semana)))
         st.session_state["dias_operacionais_semana"] = dias_operacionais_semana
+        if dias_operacionais_mes <= 0:
+            st.session_state["dias_operacionais_mes"] = float(dias_operacionais_semana) * float(WEEKS_PER_MONTH)
         st.session_state["folga_operacional"] = float(folga_operacional)
+
+        dias_operacionais_em_uso = int(round(float(st.session_state.get("dias_operacionais_semana", dias_operacionais_semana))))
+        dias_operacionais_em_uso = max(1, min(7, dias_operacionais_em_uso))
 
         ocupacao_alvo = float(DEFAULT_OCUPACAO_ALVO)
         fator_monotonia = 1.0 + folga_operacional if modo_calc else 1.0 + folga_operacional
@@ -865,7 +905,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             estrutura_defaults: Dict[str, float] = {}
             estrutura_flags: Dict[str, bool] = {}
             if has_lookup:
-                for key in ["Area Total", "Qtd Caixas", "HorasOperacionais", "DiasOperacionais"]:
+                for key in ["Area Total", "Qtd Caixas", "HorasOperacionais", "DiasOperacionaisMes"]:
                     val = safe_float(get_lookup(lookup_row, key), 0.0)
                     if not pd.isna(val) and val is not None and val != 0.0:
                         estrutura_defaults[key] = val
@@ -876,9 +916,9 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     else:
                         estrutura_flags[key] = bool(val)
             area_total = float(estrutura_defaults.get("Area Total", 0.0) or 0.0)
-            dias_operacionais_base = int(st.session_state.get("dias_operacionais_semana", 6))
-            dias_operacionais_em_uso = int(st.session_state.get("dias_operacionais_loja_form", dias_operacionais_base))
-            dias_operacionais_em_uso = max(1, min(7, dias_operacionais_em_uso))
+            dias_operacionais_base = safe_float(st.session_state.get("dias_operacionais_mes"), 0.0)
+            if dias_operacionais_base <= 0:
+                dias_operacionais_base = float(st.session_state.get("dias_operacionais_semana", 6.0)) * float(WEEKS_PER_MONTH)
             colA, colB, colC = st.columns(3)
             with colA:
                 qtd_caixas = st.number_input(
@@ -904,34 +944,46 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     index=1 if estrutura_flags.get("Copa") else 0,
                 ) == "Sim"
             with colC:
-                dias_operacionais_prefill = int(estrutura_defaults.get("DiasOperacionais", dias_operacionais_em_uso))
-                dias_operacionais_prefill = max(1, min(7, dias_operacionais_prefill))
-                dias_operacionais_loja = st.number_input(
-                    "Dias operacionais (dados da loja)",
-                    min_value=1,
-                    max_value=7,
-                    step=1,
-                    value=dias_operacionais_prefill,
-                    help="Número de dias em que a loja mantém operação. Usado para converter horas diárias em semanais.",
+                dias_operacionais_prefill = safe_float(
+                    estrutura_defaults.get("DiasOperacionaisMes", dias_operacionais_base),
+                    dias_operacionais_base,
                 )
-                dias_operacionais_loja = int(dias_operacionais_loja)
-                dias_operacionais_em_uso = dias_operacionais_loja
+                dias_operacionais_prefill = max(1.0, min(31.0, dias_operacionais_prefill))
+                dias_operacionais_loja = st.number_input(
+                    "Dias operacionais ao mes",
+                    min_value=1.0,
+                    max_value=31.0,
+                    step=0.1,
+                    value=float(dias_operacionais_prefill),
+                    format="%.1f",
+                    help="Média histórica de dias em que a loja opera no mês.",
+                )
+                dias_operacionais_mes = float(dias_operacionais_loja)
+                dias_operacionais_semana = max(
+                    1.0,
+                    min(7.0, float(dias_operacionais_mes) / float(WEEKS_PER_MONTH)),
+                )
+                dias_operacionais_em_uso = int(round(dias_operacionais_semana))
+                dias_operacionais_em_uso = max(1, min(7, dias_operacionais_em_uso))
                 horas_op_default = float(estrutura_defaults.get("HorasOperacionais", 0.0) or st.session_state.get("horas_loja_config", 0.0))
-                if horas_op_default > 0 and horas_op_default <= 24:
-                    horas_op_default = horas_op_default * dias_operacionais_em_uso
+                if horas_op_default > 24 and dias_operacionais_semana > 0:
+                    horas_op_default = horas_op_default / max(1.0, dias_operacionais_semana)
                 horas_operacionais_input = st.number_input(
-                    "Horas operacionais (h/semana)",
-                    min_value=7.0,
-                    max_value=168.0,
+                    "Horas operacionais (h/dia)",
+                    min_value=1.0,
+                    max_value=24.0,
                     step=1.0,
                     value=float(horas_op_default),
-                    format="%.0f",
-                    help="Tempo total semanal de funcionamento da loja (ex: 60h para 10h/dia x 6 dias). Alimenta os cálculos ideais/ML.",
+                    format="%.1f",
+                    help="Horas de funcionamento por dia. Alimenta os cálculos ideais/ML.",
                 )
-                horas_operacionais_semanais = float(horas_operacionais_input)
-                horas_operacionais_diarias = horas_operacionais_semanais / max(1, dias_operacionais_em_uso)
+                horas_operacionais_diarias = float(horas_operacionais_input)
+                horas_operacionais_semanais = horas_operacionais_diarias * max(1.0, dias_operacionais_semana)
             st.session_state["dias_operacionais_loja_form"] = dias_operacionais_em_uso
-            st.session_state["dias_operacionais_semana"] = dias_operacionais_em_uso
+            st.session_state["dias_operacionais_semana"] = float(dias_operacionais_semana)
+            st.session_state["dias_operacionais_mes"] = float(dias_operacionais_mes)
+            st.session_state["horas_operacionais_form"] = float(horas_operacionais_diarias)
+            st.session_state["horas_loja_config"] = float(horas_operacionais_diarias)
 
             st.divider()
 
@@ -1200,13 +1252,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         st.metric("% Retirada", f"{values.get('%Retirada', 0.0):.2f}%")
 
             # Derivar faturamento/hora a partir de ReceitaTotalMes / (dias operacionais do mes * horas operacionais)
-            dias_operacionais_mes = 0.0
-            horas_operacionais_ref = 0.0
+            dias_operacionais_mes = safe_float(st.session_state.get("dias_operacionais_mes"), 0.0)
+            horas_operacionais_ref = float(horas_operacionais_diarias)
             if has_lookup:
-                dias_operacionais_mes = safe_float(get_lookup(lookup_row, "DiasOperacionaisMes"), 0.0)
-                horas_operacionais_ref = safe_float(get_lookup(lookup_row, "HorasOperacionais"), 0.0)
-            if horas_operacionais_ref > 24 and dias_operacionais_em_uso > 0:
-                horas_operacionais_ref = horas_operacionais_ref / max(1.0, float(dias_operacionais_em_uso))
+                if dias_operacionais_mes <= 0:
+                    dias_operacionais_mes = safe_float(get_lookup(lookup_row, "DiasOperacionaisMes"), 0.0)
+                if horas_operacionais_ref <= 0:
+                    horas_operacionais_ref = safe_float(get_lookup(lookup_row, "HorasOperacionais"), 0.0)
+            if horas_operacionais_ref > 24 and dias_operacionais_semana > 0:
+                horas_operacionais_ref = horas_operacionais_ref / max(1.0, float(dias_operacionais_semana))
             if horas_operacionais_ref <= 0:
                 horas_operacionais_ref = float(horas_operacionais_diarias)
             if dias_operacionais_mes <= 0 and df_estrutura is not None and not df_estrutura.empty:
@@ -1281,7 +1335,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
             cluster_values["Faturamento/Hora"] = cluster_values_estimados["Faturamento/Hora"]
 
-            st.session_state["horas_operacionais_form"] = float(horas_operacionais_semanais)
+            st.session_state["horas_operacionais_form"] = float(horas_operacionais_diarias)
 
             features_input_ideal = montar_features_input(
                 area_total,
@@ -1562,12 +1616,12 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     use_container_width=True,
                 )
 
+    dias_operacionais_ativos = int(st.session_state.get("dias_operacionais_semana", dias_operacionais_semana))
+    dias_operacionais_ativos = max(1, min(7, dias_operacionais_ativos))
+
     if submitted:
         st.session_state["anchor_rpa_percent"] = anchor_percent
         st.session_state["anchor_rpa_quantile"] = float(anchor_percent) / 100.0
-
-    dias_operacionais_ativos = int(st.session_state.get("dias_operacionais_loja_form", dias_operacionais_semana))
-    dias_operacionais_ativos = max(1, min(7, dias_operacionais_ativos))
     anchor_quantile = float(st.session_state.get("anchor_rpa_quantile", float(anchor_percent) / 100.0))
 
     if not submitted:
@@ -1609,13 +1663,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     model_bundle_hist = None
     model_bundle_ideal = None
     if modo_ml:
-        if criterio_key == "SalarioMapeadoIAF25":
-            criterio_cache_bump = 2000
-        elif criterio_key == "SalarioMapeado":
-            criterio_cache_bump = 1000
-        else:
-            criterio_cache_bump = 0
-        cache_ver = 9 + int(anchor_quantile * 100) + criterio_cache_bump
+        criterio_hash = zlib.adler32(str(criterio_key).encode("utf-8")) % 10000
+        cache_ver = 9 + int(anchor_quantile * 100) + (CATBOOST_PARAM_VERSION * 1000) + criterio_hash
         model_bundle_hist = _train_cached(
             train_df,
             "historico",
@@ -1653,6 +1702,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         dias_operacionais_em_uso,
         dias_operacionais_ativos,
         horas_loja_manual,
+        dias_operacionais_mes=safe_float(st.session_state.get("dias_operacionais_mes"), 0.0),
     )
     tmedio_min_atend = float(st.session_state.get("tmedio_min_atend", 6.0))
     result_ideal = None
@@ -1706,7 +1756,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 algo_order=["catboost"],
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
-                compute_metrics=mostrar_metricas,
+                compute_metrics=False,
             )
             resultados_modelos = [res for res in resultados_modelos if res.get("key") == "catboost"]
         if model_bundle_ideal is not None:
@@ -1721,6 +1771,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
                 compute_metrics=mostrar_metricas,
+                metrics_cache_bust=cache_ver,
                 skip_cap_cols=skip_cap_cols_ideal,
             )
             resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
@@ -2059,9 +2110,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     "<path d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'></path>"
                     "<line x1='12' y1='17' x2='12.01' y2='17'></line>"
                     "</svg></span></div>"
-                    f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>{seg_sugerido}</div>"
-                    f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
-                    f"({float(seg_sugerido):.2f} colab.)</div>"
+                    "<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                    "&#128274;</div>"
                     "</div>"
                     "</div>"
                     "</div>"
@@ -2310,16 +2360,17 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
 
                 metric_configs: List[Dict[str, object]] = [
                     {
-                        "key": "Precisao_percent",
+                        "key": "SMAPE",
                         "label": "Precisao",
+                        "transform": lambda v: (1.0 - v) * 100.0,
                         "format": lambda v: f"{v:.1f}%",
                         "bands": [
                             {"label": "Ajustar", "min": 0.0, "max": 70.0, "color": "#f0b429"},
                             {"label": "Bom", "min": 70.0, "max": 85.0, "color": "#4da3f5"},
                             {"label": "Ótimo", "min": 85.0, "max": 100.0, "color": "#2c9a6c"},
                         ],
-                        "faixa_otima": "Ótimo >= 85% de acerto",
-                        "helper": "Percentual de previsoes com erro baixo (1 - MAPE). Quanto maior, melhor para confianca no headcount.",
+                        "faixa_otima": "Ótimo >= 85% de acerto (1 - SMAPE)",
+                        "helper": "Percentual de previsoes com erro baixo (1 - SMAPE). Quanto maior, melhor para confianca no headcount.",
                         "scale_max": 100.0,
                     },
                     {
@@ -2392,6 +2443,20 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     warn_list = metrics_info_ideal.get("warnings")
                     if warn_list:
                         st.caption("Avisos do modelo: " + " | ".join(map(str, warn_list)))
+                with st.expander("Debug métricas (criterio/valores usados)", expanded=False):
+                    st.json(
+                        {
+                            "criterio_key": criterio_key,
+                            "criterio_label": criterio_label,
+                            "anchor_quantile": anchor_quantile,
+                            "margem": margem,
+                            "horas_disp": horas_disp,
+                            "cache_ver": cache_ver,
+                            "train_rows": int(len(train_df)),
+                            "train_cols": int(len(train_df.columns)),
+                            "metrics": metrics_info_ideal,
+                        }
+                    )
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
 
@@ -2592,9 +2657,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 "<path d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'></path>"
                 "<line x1='12' y1='17' x2='12.01' y2='17'></line>"
                 "</svg></span></div>"
-                f"<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>{seg_sugerido}</div>"
-                f"<div style='font-size:0.9rem;font-weight:400;color:#6c6c6c;'>"
-                f"({float(seg_sugerido):.2f} colab.)</div>"
+                "<div style='font-size:1.3rem;font-weight:700;color:#0c0863;'>"
+                "&#128274;</div>"
                 "</div>"
                 "</div>"
                 "</div>"

@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 
+CATBOOST_PARAM_VERSION = 3
+
 try:
     from catboost import CatBoostRegressor  # type: ignore
 except ImportError:
@@ -200,6 +202,7 @@ def train_catboost_model(
     numeric_cols: List[str],
     categorical_cols: List[str],
     sample_weights: pd.Series,
+    loss_mid: str = "RMSE",
 ) -> Optional[CatBoostQuantileModel]:
     if CatBoostRegressor is None:
         raise ImportError("CatBoostRegressor indisponivel. Instale 'catboost'.")
@@ -231,10 +234,10 @@ def train_catboost_model(
     def _fit_cat_model(loss: str) -> CatBoostRegressor:
         model_cb = CatBoostRegressor(
             depth=6,
-            learning_rate=0.05,
-            n_estimators=800,
-            subsample=0.9,
-            l2_leaf_reg=5.0,
+            learning_rate=0.03,
+            n_estimators=1000,
+            subsample=0.85,
+            l2_leaf_reg=7.0,
             loss_function=loss,
             random_seed=42,
             verbose=False,
@@ -248,7 +251,7 @@ def train_catboost_model(
         )
         return model_cb
 
-    model_mid = _fit_cat_model("RMSE")
+    model_mid = _fit_cat_model(loss_mid)
     model_low = _fit_cat_model("Quantile:alpha=0.01")
     model_high = _fit_cat_model("Quantile:alpha=0.99")
     wrapper = CatBoostQuantileModel(

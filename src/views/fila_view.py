@@ -173,16 +173,24 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
                     ["por semana", "por dia", "por mês"],
                     help="Define o período usado para os campos de frequência abaixo.",
                 )
-                dias_oper = st.number_input(
-                    "Dias operacionais",
-                    min_value=1,
-                    max_value=7,
-                    value=int(st.session_state.get("dias_operacionais_loja_form", st.session_state.get("dias_operacionais_semana", 6))),
-                    help="Usado para converter frequências diárias em semana e lambda/hora.",
+                dias_oper_mes_default = float(st.session_state.get("dias_operacionais_mes", 0.0) or 0.0)
+                if dias_oper_mes_default <= 0:
+                    dias_oper_mes_default = float(st.session_state.get("dias_operacionais_semana", 6.0)) * float(WEEKS_PER_MONTH)
+                dias_oper_mes = st.number_input(
+                    "Dias operacionais ao mês",
+                    min_value=1.0,
+                    max_value=31.0,
+                    step=0.1,
+                    value=float(dias_oper_mes_default),
+                    format="%.1f",
+                    help="Média histórica; usada para converter frequências diárias para base semanal e lambda/hora.",
                 )
+                dias_oper_semana = max(1.0, min(7.0, float(dias_oper_mes) / float(WEEKS_PER_MONTH)))
+                st.session_state["dias_operacionais_mes"] = float(dias_oper_mes)
+                st.session_state["dias_operacionais_semana"] = float(dias_oper_semana)
                 horas_dia_default_raw = float(st.session_state.get("horas_operacionais_form", st.session_state.get("horas_loja_config", 10.0)))
                 if horas_dia_default_raw > 24:
-                    horas_dia_default_raw = horas_dia_default_raw / max(float(dias_oper), 1.0)
+                    horas_dia_default_raw = horas_dia_default_raw / max(float(dias_oper_semana), 1.0)
                 horas_dia_default = max(1.0, min(24.0, horas_dia_default_raw))
                 horas_dia = st.number_input(
                     "Horas operacionais por dia",
@@ -241,7 +249,7 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
                 )
 
             st.markdown("#### Processos e frequências")
-            horas_semana_oper = horas_dia * dias_oper
+            horas_semana_oper = horas_dia * dias_oper_semana
             freq_label = {
                 "por semana": "freq/semana",
                 "por dia": "freq/dia",
@@ -281,7 +289,7 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
 
                 freq_semana = freq_val
                 if freq_periodo == "por dia":
-                    freq_semana = freq_val * dias_oper
+                    freq_semana = freq_val * dias_oper_semana
                 elif freq_periodo == "por mês":
                     freq_semana = freq_val / WEEKS_PER_MONTH
                 lambda_proc = freq_semana / max(horas_semana_oper, 1e-6)
@@ -349,7 +357,7 @@ def render_fila_tab(tab_fila: DeltaGenerator) -> None:
         )
         if ativos:
             df_proc = pd.DataFrame(ativos)
-            df_proc["freq_dia"] = df_proc["freq_semana"] / max(dias_oper, 1)
+            df_proc["freq_dia"] = df_proc["freq_semana"] / max(dias_oper_semana, 1)
             df_proc["carga_semana_horas"] = df_proc["carga_semana_min"] / 60.0
             freq_informada_label = f"Freq. informada ({freq_label})"
             df_proc = df_proc.rename(

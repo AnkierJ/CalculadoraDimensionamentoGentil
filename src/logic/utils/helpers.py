@@ -253,7 +253,6 @@ def get_schema_dEstrutura() -> Dict[str, str]:
         "Escritorio": "boolean",
         "Shopping": "boolean",
         "HorasOperacionais": "float",
-        "DiasOperacionais": "float",
         "DiasOperacionaisMes": "float",
     }
 

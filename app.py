@@ -1,7 +1,7 @@
 ﻿import streamlit as st
 from pathlib import Path
 
-from src.logic.core.logic import _load_with_version
+from src.logic.core.logic import _load_with_version, merge_indicadores_from_faturamento
 from src.logic.utils.helpers import _standardize_cols
 from src.views.calc_view import render_calc_tab
 from src.views.comparativo_view import render_comparativo_tab
@@ -12,17 +12,30 @@ from src.views.layout import inject_global_styles, render_header, render_tutoria
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
-# Carregamento inicial dos datasets em session_state
-if "dAmostras" not in st.session_state:
-    st.session_state["dAmostras"] = _load_with_version(f"{DATA_DIR}/dAmostras.csv", "dAmostras")
-if "dEstrutura" not in st.session_state:
-    st.session_state["dEstrutura"] = _load_with_version(f"{DATA_DIR}/dEstrutura.csv", "dEstrutura")
-if "dPessoas" not in st.session_state:
-    st.session_state["dPessoas"] = _load_with_version(f"{DATA_DIR}/dPessoas.csv", "dPessoas")
-if "fFaturamento2" not in st.session_state:
-    st.session_state["fFaturamento2"] = _load_with_version(f"{DATA_DIR}/fFaturamento2.csv", "fFaturamento2")
-if "fIndicadores" not in st.session_state:
-    st.session_state["fIndicadores"] = _load_with_version(f"{DATA_DIR}/fIndicadores.csv", "fIndicadores")
+# Carregamento dos datasets em session_state (com recarga se arquivo mudar)
+def _refresh_dataset(key: str, path: Path, schema: str) -> None:
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        mtime = 0.0
+    mtime_key = f"_mtime_{key}"
+    if key not in st.session_state or st.session_state.get(mtime_key) != mtime:
+        st.session_state[key] = _load_with_version(str(path), schema)
+        st.session_state[mtime_key] = mtime
+
+
+_refresh_dataset("dAmostras", DATA_DIR / "dAmostras.csv", "dAmostras")
+_refresh_dataset("dEstrutura", DATA_DIR / "dEstrutura.csv", "dEstrutura")
+_refresh_dataset("dPessoas", DATA_DIR / "dPessoas.csv", "dPessoas")
+_refresh_dataset("fFaturamento2", DATA_DIR / "fFaturamento2.csv", "fFaturamento2")
+_refresh_dataset("fIndicadores", DATA_DIR / "fIndicadores.csv", "fIndicadores")
+st.session_state["_data_version"] = (
+    st.session_state.get("_mtime_dAmostras"),
+    st.session_state.get("_mtime_dEstrutura"),
+    st.session_state.get("_mtime_dPessoas"),
+    st.session_state.get("_mtime_fFaturamento2"),
+    st.session_state.get("_mtime_fIndicadores"),
+)
 
 # Paths e dicionário para uso nas views
 path_amostras = DATA_DIR / "dAmostras.csv"
@@ -43,7 +56,12 @@ inject_global_styles()
 render_header()
 render_tutorial()
 
-# Normalização das colunas de indicadores
+# Atualiza indicadores derivados a partir do fFaturamento2 e normaliza colunas
+st.session_state["fIndicadores"] = merge_indicadores_from_faturamento(
+    st.session_state.get("fIndicadores"),
+    st.session_state.get("fFaturamento2"),
+    st.session_state.get("dEstrutura"),
+)
 st.session_state["fIndicadores"] = _standardize_cols(st.session_state["fIndicadores"])
 
 # Tabs principais
