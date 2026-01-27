@@ -2365,7 +2365,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         "transform": lambda v: (1.0 - v) * 100.0,
                         "format": lambda v: f"{v:.1f}%",
                         "bands": [
-                            {"label": "Ajustar", "min": 0.0, "max": 70.0, "color": "#f0b429"},
+                            {"label": "Crítico", "min": 0.0, "max": 50.0, "color": "#d8516d"},
+                            {"label": "Ajustar", "min": 50.0, "max": 70.0, "color": "#f0b429"},
                             {"label": "Bom", "min": 70.0, "max": 85.0, "color": "#4da3f5"},
                             {"label": "Ótimo", "min": 85.0, "max": 100.0, "color": "#2c9a6c"},
                         ],
@@ -2384,22 +2385,8 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                             {"label": "Alto", "min": 3.0, "max": 5.0, "color": "#d8516d"},
                         ],
                         "faixa_otima": "Ótimo < 1 auxiliar de erro medio",
-                        "helper": "Erro absoluto medio em colaboradores. Representa a diferenca media entre previsto e observado. Quanto menor, melhor.",
+                        "helper": "Erro absoluto medio em colaboradores. Indica a diferenca media entre previsto e observado. Quanto menor, melhor.",
                         "scale_max": 5.0,
-                    },
-                    {
-                        "key": "RMSE",
-                        "label": "RMSE",
-                        "format": lambda v: f"{v:.2f}",
-                        "bands": [
-                            {"label": "Ótimo", "min": 0.0, "max": 1.5, "color": "#2c9a6c"},
-                            {"label": "Bom", "min": 1.5, "max": 2.5, "color": "#4da3f5"},
-                            {"label": "Atencao", "min": 2.5, "max": 3.5, "color": "#f0b429"},
-                            {"label": "Alto", "min": 3.5, "max": 5.5, "color": "#d8516d"},
-                        ],
-                        "faixa_otima": "Ótimo ate 1.5 colaboradores",
-                        "helper": "Raiz do erro quadratico medio. Penaliza mais os erros grandes e indica estabilidade do modelo. Quanto menor, melhor.",
-                        "scale_max": 5.5,
                     },
                     {
                         "key": "R2_mean",
@@ -2414,6 +2401,20 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                         "faixa_otima": "Ótimo >= 0.85 explicando variacao",
                         "helper": "Proporcao da variacao explicada pelo modelo (1.0 é perfeito). Quanto maior, melhor a aderencia aos dados reais.",
                         "scale_max": 1.0,
+                    },
+                    {
+                        "key": "RMSE",
+                        "label": "RMSE",
+                        "format": lambda v: f"{v:.2f}",
+                        "bands": [
+                            {"label": "Ótimo", "min": 0.0, "max": 1.5, "color": "#2c9a6c"},
+                            {"label": "Bom", "min": 1.5, "max": 2.5, "color": "#4da3f5"},
+                            {"label": "Atencao", "min": 2.5, "max": 3.5, "color": "#f0b429"},
+                            {"label": "Alto", "min": 3.5, "max": 5.5, "color": "#d8516d"},
+                        ],
+                        "faixa_otima": "Ótimo ate 1.5 colaboradores",
+                        "helper": "Raiz do erro quadratico medio. Penaliza mais os erros grandes e indica estabilidade do modelo. Quanto menor, melhor.",
+                        "scale_max": 5.5,
                     },
                 ]
 
@@ -2443,20 +2444,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                     warn_list = metrics_info_ideal.get("warnings")
                     if warn_list:
                         st.caption("Avisos do modelo: " + " | ".join(map(str, warn_list)))
-                with st.expander("Debug métricas (criterio/valores usados)", expanded=False):
-                    st.json(
-                        {
-                            "criterio_key": criterio_key,
-                            "criterio_label": criterio_label,
-                            "anchor_quantile": anchor_quantile,
-                            "margem": margem,
-                            "horas_disp": horas_disp,
-                            "cache_ver": cache_ver,
-                            "train_rows": int(len(train_df)),
-                            "train_cols": int(len(train_df.columns)),
-                            "metrics": metrics_info_ideal,
-                        }
-                    )
         else:
             st.info("Modelo CatBoost indisponivel para historico ou ideal.")
 
