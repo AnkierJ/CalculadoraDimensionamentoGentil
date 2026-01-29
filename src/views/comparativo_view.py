@@ -519,12 +519,20 @@ def render_comparativo_tab(tab_container) -> None:
         st.subheader("Grafico de Dimensionamento (Time Comercial Real vs Ideal)")
 
         pontos_df = tabela_comp.copy()
-        pontos_df["Time Comercial Real Plot"] = pd.to_numeric(
-            pontos_df["Time Comercial Real"], errors="coerce"
-        ).fillna(pd.to_numeric(pontos_df["Time Comercial Historico"], errors="coerce"))
-        pontos_df["Time Comercial Ideal Plot"] = pd.to_numeric(
-            pontos_df["Time Comercial Ideal"], errors="coerce"
-        )
+        def _coerce_numeric_series(series: pd.Series) -> pd.Series:
+            numeric = pd.to_numeric(series, errors="coerce")
+            mask_nan = numeric.isna()
+            if mask_nan.any():
+                numeric.loc[mask_nan] = series.loc[mask_nan].apply(
+                    lambda v: safe_float(v, float("nan"))
+                )
+            return numeric
+
+        real_vals = _coerce_numeric_series(pontos_df["Time Comercial Real"])
+        hist_vals = _coerce_numeric_series(pontos_df["Time Comercial Historico"])
+        ideal_vals = _coerce_numeric_series(pontos_df["Time Comercial Ideal"])
+        pontos_df["Time Comercial Real Plot"] = real_vals.fillna(hist_vals)
+        pontos_df["Time Comercial Ideal Plot"] = ideal_vals
         use_ratio_fmt = criterio_key in ("SalarioMapeado", "SalarioMapeadoIAF25")
         pontos_df[ratio_col_fmt] = pontos_df[ratio_col].apply(
             _format_ratio if use_ratio_fmt else _format_brl
@@ -536,16 +544,18 @@ def render_comparativo_tab(tab_container) -> None:
             st.info("Sem pontos validos para o grafico de comparativo.")
             return
 
-        hist_vals = pd.to_numeric(pontos_df["Time Comercial Historico"], errors="coerce")
-        ideal_vals = pd.to_numeric(pontos_df["Time Comercial Ideal"], errors="coerce")
-        max_val = max(float(hist_vals.max(skipna=True)), float(ideal_vals.max(skipna=True)))
-        if not math.isfinite(max_val):
-            alt_max = pd.to_numeric(pontos_df["Time Comercial Ideal Plot"], errors="coerce").max(skipna=True)
-            max_val = float(alt_max) if pd.notna(alt_max) else 0.0
+        max_real_plot = pontos_df["Time Comercial Real Plot"].max(skipna=True)
+        max_ideal_plot = pontos_df["Time Comercial Ideal Plot"].max(skipna=True)
+        max_base = max(
+            float(max_real_plot) if math.isfinite(max_real_plot) else 0.0,
+            float(max_ideal_plot) if math.isfinite(max_ideal_plot) else 0.0,
+        )
+
         step = 5
-        upper = max(step, int(math.ceil(max_val / step) * step))
-        if upper == int(max_val) and upper % step == 0:
-            upper += step
+        if not math.isfinite(max_base) or max_base <= 0:
+            upper = step
+        else:
+            upper = int(math.floor(max_base / step) + 1) * step
         x_min, x_max = 0.0, float(upper)
         y_min, y_max = 0.0, float(upper)
 
@@ -733,6 +743,11 @@ def render_comparativo_tab(tab_container) -> None:
                 "tooltip": [
                     {"field": "Loja", "type": "nominal", "title": "Loja"},
                     {"field": "Praca", "type": "nominal", "title": "Praca"},
+                    {
+                        "field": "Time Comercial Real",
+                        "type": "quantitative",
+                        "title": "Time Comercial Real",
+                    },
                     {
                         "field": "Time Comercial Historico",
                         "type": "quantitative",
