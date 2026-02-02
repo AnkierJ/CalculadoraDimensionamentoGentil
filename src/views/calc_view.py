@@ -1664,14 +1664,15 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
     model_bundle_ideal = None
     if modo_ml:
         criterio_hash = zlib.adler32(str(criterio_key).encode("utf-8")) % 10000
-        cache_ver = 9 + int(anchor_quantile * 100) + (CATBOOST_PARAM_VERSION * 1000) + criterio_hash
+        cache_ver_hist = 9 + (CATBOOST_PARAM_VERSION * 1000)
+        cache_ver_ideal = 9 + int(anchor_quantile * 100) + (CATBOOST_PARAM_VERSION * 1000) + criterio_hash
         model_bundle_hist = _train_cached(
             train_df,
             "historico",
             horas_disp,
             margem,
             anchor_quantile=anchor_quantile,
-            cache_version=cache_ver,
+            cache_version=cache_ver_hist,
         )
         def _warn_model_issue(bundle: Optional[Dict[str, object]], label: str) -> None:
             errors = (bundle or {}).get("errors") or {}
@@ -1686,7 +1687,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             horas_disp,
             margem,
             anchor_quantile=anchor_quantile,
-            cache_version=cache_ver,
+            cache_version=cache_ver_ideal,
         )
 
     estrutura_df = st.session_state.get("dEstrutura")

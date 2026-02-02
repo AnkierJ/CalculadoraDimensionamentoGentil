@@ -957,15 +957,15 @@ def _prepare_model_data(
     if train_df is None or train_df.empty:
         return None
     used_features = [c for c in FEATURE_COLUMNS if c in train_df.columns]
-    criterio_key = get_criterio_mapeado_key()
-    if criterio_key == "SalarioMapeadoIAF25":
+    criterio_key = get_criterio_mapeado_key() if mode == "ideal" else "TotalMapeado"
+    if criterio_key == "SalarioMapeadoIAF25" and mode == "ideal":
         for col in ["%IAF25", "SalarioMapeado", "TotalMapeado"]:
             if col in train_df.columns and col not in used_features:
                 used_features.append(col)
     if not used_features:
         return None
     preserve_cols = ["BaseAtiva", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora"]
-    if criterio_key == "SalarioMapeadoIAF25":
+    if criterio_key == "SalarioMapeadoIAF25" and mode == "ideal":
         preserve_cols.extend(["%IAF25", "SalarioMapeado", "TotalMapeado"])
     used_features = drop_high_correlation(
         train_df,
@@ -986,7 +986,7 @@ def _prepare_model_data(
     X, y = X.loc[mask_valid], y.loc[mask_valid]
     if X.empty:
         return None
-    if criterio_key == "SalarioMapeadoIAF25" and y.notna().sum() >= 10:
+    if mode == "ideal" and criterio_key == "SalarioMapeadoIAF25" and y.notna().sum() >= 10:
         q_low, q_high = y.quantile([0.02, 0.98])
         if pd.notna(q_low) and pd.notna(q_high) and q_low < q_high:
             y = y.clip(lower=float(q_low), upper=float(q_high))
@@ -2348,8 +2348,8 @@ ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
         "Salario Mapeado": "SalarioMapeado",
     },
 }
-@st.cache_data(show_spinner=False)    
-def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False)
+def _load_csv_cached(path: str, schema_name: str, file_version: object) -> pd.DataFrame:
     # mapa de nomes → factories de schema
     """Carrega CSVs do disco usando cache baseado no timestamp do arquivo."""
     schema_map = {
@@ -2362,14 +2362,20 @@ def _load_csv_cached(path: str, schema_name: str, file_version: float) -> pd.Dat
     schema_fn = schema_map[schema_name]
     aliases = ALIASES_BY_SCHEMA.get(schema_name, {})
     return load_csv_path(path, schema_fn(), aliases)
-def _load_with_version(path: str, schema_name: str) -> pd.DataFrame:
-    """Empacota a leitura do CSV usando o mtime como chave de cache."""
-    file_path = Path(path)
-    try:
-        mtime = file_path.stat().st_mtime
-    except FileNotFoundError:
-        mtime = 0.0
-    return _load_csv_cached(path, schema_name, mtime)
+def _load_with_version(
+    path: str,
+    schema_name: str,
+    file_version: Optional[object] = None,
+) -> pd.DataFrame:
+    """Empacota a leitura do CSV usando uma versao de arquivo como chave de cache."""
+    if file_version is None:
+        file_path = Path(path)
+        try:
+            stat = file_path.stat()
+            file_version = (stat.st_mtime_ns, stat.st_size)
+        except FileNotFoundError:
+            file_version = (0, 0)
+    return _load_csv_cached(path, schema_name, file_version)
 
 
 def _parse_hour_value(value: object) -> Optional[int]:
@@ -2461,8 +2467,19 @@ def derive_indicadores_from_faturamento(
         receita_total = orders.groupby("Loja")["Faturamento"].sum()
     else:
         receita_total = pd.Series(0.0, index=res.index, dtype="float64")
-    meses_norm = int(max(1, meses_ano))
-    res["ReceitaTotalMes"] = receita_total / float(meses_norm)
+    meses_total = pd.Series(0.0, index=res.index, dtype="float64")
+    if "DataPedido" in orders.columns:
+        datas = pd.to_datetime(orders["DataPedido"], errors="coerce")
+        if datas.notna().any():
+            ym = datas.dt.to_period("M")
+            meses_df = pd.DataFrame({"Loja": orders["Loja"], "_ym": ym}).dropna(subset=["_ym"])
+            if not meses_df.empty:
+                meses_total = meses_df.groupby("Loja")["_ym"].nunique().astype(float)
+    meses_total = meses_total.reindex(res.index).fillna(0.0)
+    meses_total = meses_total.where(meses_total > 0, float(meses_ano))
+    meses_total = meses_total.clip(lower=1.0, upper=12.0)
+    receita_total = receita_total.reindex(res.index).fillna(0.0)
+    res["ReceitaTotalMes"] = receita_total / meses_total
     if "Itens" in orders.columns:
         res["ItensTotal"] = orders.groupby("Loja")["Itens"].sum()
     else:

@@ -141,7 +141,9 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
             st.caption("Rankings de faturamento por TotalMapeado, SalarioMapeado e SalarioMapeado*%IAF25.")
             estrutura_df = st.session_state.get("dEstrutura")
             pessoas_df = st.session_state.get("dPessoas")
-            indicadores_df = st.session_state.get("fIndicadores")
+            indicadores_df = st.session_state.get("fIndicadores_raw")
+            if indicadores_df is None:
+                indicadores_df = st.session_state.get("fIndicadores")
 
             if estrutura_df is None or estrutura_df.empty:
                 st.warning("Base de estrutura vazia ou nÇœo carregada.")

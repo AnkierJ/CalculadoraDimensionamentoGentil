@@ -15,13 +15,14 @@ DATA_DIR = BASE_DIR / "data"
 # Carregamento dos datasets em session_state (com recarga se arquivo mudar)
 def _refresh_dataset(key: str, path: Path, schema: str) -> None:
     try:
-        mtime = path.stat().st_mtime
+        stat = path.stat()
+        file_version = (stat.st_mtime_ns, stat.st_size)
     except FileNotFoundError:
-        mtime = 0.0
-    mtime_key = f"_mtime_{key}"
-    if key not in st.session_state or st.session_state.get(mtime_key) != mtime:
-        st.session_state[key] = _load_with_version(str(path), schema)
-        st.session_state[mtime_key] = mtime
+        file_version = (0, 0)
+    version_key = f"_version_{key}"
+    if key not in st.session_state or st.session_state.get(version_key) != file_version:
+        st.session_state[key] = _load_with_version(str(path), schema, file_version=file_version)
+        st.session_state[version_key] = file_version
 
 
 _refresh_dataset("dAmostras", DATA_DIR / "dAmostras.csv", "dAmostras")
@@ -30,11 +31,11 @@ _refresh_dataset("dPessoas", DATA_DIR / "dPessoas.csv", "dPessoas")
 _refresh_dataset("fFaturamento2", DATA_DIR / "fFaturamento2.csv", "fFaturamento2")
 _refresh_dataset("fIndicadores", DATA_DIR / "fIndicadores.csv", "fIndicadores")
 st.session_state["_data_version"] = (
-    st.session_state.get("_mtime_dAmostras"),
-    st.session_state.get("_mtime_dEstrutura"),
-    st.session_state.get("_mtime_dPessoas"),
-    st.session_state.get("_mtime_fFaturamento2"),
-    st.session_state.get("_mtime_fIndicadores"),
+    st.session_state.get("_version_dAmostras"),
+    st.session_state.get("_version_dEstrutura"),
+    st.session_state.get("_version_dPessoas"),
+    st.session_state.get("_version_fFaturamento2"),
+    st.session_state.get("_version_fIndicadores"),
 )
 
 # Paths e dicionário para uso nas views
@@ -57,8 +58,11 @@ render_header()
 render_tutorial()
 
 # Atualiza indicadores derivados a partir do fFaturamento2 e normaliza colunas
+st.session_state["fIndicadores_raw"] = _standardize_cols(
+    st.session_state.get("fIndicadores")
+)
 st.session_state["fIndicadores"] = merge_indicadores_from_faturamento(
-    st.session_state.get("fIndicadores"),
+    st.session_state.get("fIndicadores_raw"),
     st.session_state.get("fFaturamento2"),
     st.session_state.get("dEstrutura"),
 )
