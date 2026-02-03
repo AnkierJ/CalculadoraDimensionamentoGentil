@@ -73,7 +73,7 @@ CRITERIO_MAPEADO_DEFAULT = "TotalMapeado"
 CRITERIO_MAPEADO_OPTIONS = {
     "Faturamento/TotalMapeado": "TotalMapeado",
     "Faturamento/SalarioMapeado": "SalarioMapeado",
-    "Faturamento/SalarioMapeado*%IAF25": "SalarioMapeadoIAF25",
+    "ReceitaTotalMes*%IAF/SalarioMapeado": "SalarioMapeadoIAF25",
 }
 MAPEADO_HELPER_TEXT = (
     "Mapeado abrange os cargos de auxiliares, lideres, caixas, "

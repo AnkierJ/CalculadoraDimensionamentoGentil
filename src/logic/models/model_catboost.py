@@ -6,8 +6,9 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.model_selection import train_test_split
 
-CATBOOST_PARAM_VERSION = 3
+CATBOOST_PARAM_VERSION = 6
 
 try:
     from catboost import CatBoostRegressor  # type: ignore
@@ -203,6 +204,7 @@ def train_catboost_model(
     categorical_cols: List[str],
     sample_weights: pd.Series,
     loss_mid: str = "RMSE",
+    criterio_key: Optional[str] = None,
 ) -> Optional[CatBoostQuantileModel]:
     if CatBoostRegressor is None:
         raise ImportError("CatBoostRegressor indisponivel. Instale 'catboost'.")
@@ -230,25 +232,93 @@ def train_catboost_model(
             )
     cat_feature_indices = [X_proc.columns.get_loc(col) for col in categorical_in_model]
     sample_weight_np = sample_weights.to_numpy(dtype=float)
+    use_eval = len(X_proc) >= 30
+    if use_eval:
+        X_train, X_val, y_train, y_val, sw_train, sw_val = train_test_split(
+            X_proc,
+            y,
+            sample_weight_np,
+            test_size=0.15,
+            random_state=42,
+            shuffle=True,
+        )
+    else:
+        X_train, y_train, sw_train = X_proc, y, sample_weight_np
+        X_val = y_val = sw_val = None
 
     def _fit_cat_model(loss: str) -> CatBoostRegressor:
-        model_cb = CatBoostRegressor(
+        tuned = None
+        if criterio_key == "TotalMapeado":
+            tuned = dict(
+                depth=7,
+                learning_rate=0.06,
+                n_estimators=900,
+                subsample=0.9,
+                rsm=0.9,
+                l2_leaf_reg=5.0,
+                random_strength=0.0,
+                min_data_in_leaf=4,
+            )
+        elif criterio_key == "SalarioMapeado":
+            tuned = dict(
+                depth=5,
+                learning_rate=0.03,
+                n_estimators=900,
+                subsample=0.9,
+                rsm=0.9,
+                l2_leaf_reg=5.0,
+                random_strength=0.0,
+                min_data_in_leaf=4,
+            )
+        params = dict(
             depth=6,
-            learning_rate=0.03,
-            n_estimators=1000,
+            learning_rate=0.05,
+            n_estimators=1200,
             subsample=0.85,
-            l2_leaf_reg=7.0,
+            rsm=0.8,
+            l2_leaf_reg=8.0,
+            random_strength=0.5,
+            min_data_in_leaf=3,
             loss_function=loss,
             random_seed=42,
             verbose=False,
             allow_writing_files=False,
         )
-        model_cb.fit(
-            X_proc,
-            y,
-            cat_features=cat_feature_indices,
-            sample_weight=sample_weight_np,
-        )
+        if tuned:
+            params.update(tuned)
+        params["loss_function"] = loss
+        if use_eval:
+            params.update(
+                use_best_model=True,
+                od_type="Iter",
+                od_wait=60,
+            )
+        model_cb = CatBoostRegressor(**params)
+        if use_eval:
+            try:
+                model_cb.fit(
+                    X_train,
+                    y_train,
+                    cat_features=cat_feature_indices,
+                    sample_weight=sw_train,
+                    eval_set=(X_val, y_val),
+                    sample_weight_eval_set=sw_val,
+                )
+            except TypeError:
+                model_cb.fit(
+                    X_train,
+                    y_train,
+                    cat_features=cat_feature_indices,
+                    sample_weight=sw_train,
+                    eval_set=(X_val, y_val),
+                )
+        else:
+            model_cb.fit(
+                X_train,
+                y_train,
+                cat_features=cat_feature_indices,
+                sample_weight=sw_train,
+            )
         return model_cb
 
     model_mid = _fit_cat_model(loss_mid)

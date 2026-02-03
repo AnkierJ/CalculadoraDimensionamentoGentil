@@ -537,6 +537,7 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         "TotalMapeado",
         "SalarioMapeado",
         "%IAF25",
+        "ReceitaIAFPorSalario",
     ]
     for extra_col in extra_numeric:
         if extra_col in df.columns:
@@ -545,6 +546,15 @@ def prepare_training_dataframe(dEstrutura, dPessoas, fIndicadores) -> pd.DataFra
         receita = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce")
         qtd_aux_hist = pd.to_numeric(df["QtdAux"], errors="coerce").replace(0, pd.NA)
         df["ReceitaPorAux"] = (receita / qtd_aux_hist).replace([float("inf"), float("-inf")], pd.NA)
+    if {"ReceitaTotalMes", "SalarioMapeado"}.issubset(df.columns):
+        receita = pd.to_numeric(df["ReceitaTotalMes"], errors="coerce")
+        salario_map = pd.to_numeric(df["SalarioMapeado"], errors="coerce").replace(0, pd.NA)
+        iaf_series = _normalize_iaf_series(df.get("%IAF25"), df.index).fillna(1.0)
+        receita_iaf = receita * iaf_series
+        df["ReceitaIAFPorSalario"] = (receita_iaf / salario_map).replace(
+            [float("inf"), float("-inf")],
+            pd.NA,
+        )
     def _fill_ratio(target: str, numerator_col: str, denom_col: str, fallback_col: Optional[str] = None, multiplier: float = 1.0):
         if numerator_col not in df.columns:
             return
@@ -646,12 +656,12 @@ FEATURE_COLUMNS = [
     # demanda/fluxo
     "Pedidos/Hora", "Pedidos/Dia", "Itens/Pedido", "Faturamento/Hora", "%Retirada",
     # base comercial
-    "BaseAtiva", "TaxaInicios", "TaxaReativacao",
+    "BaseAtiva", "ReceitaTotalMes", "TaxaInicios", "TaxaReativacao",
     # disponibilidade/operacao
     "HorasOperacionais",
 ]
 CONT = ["Area Total","Qtd Caixas","Pedidos/Hora","Pedidos/Dia",
-        "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva",
+        "Itens/Pedido","Faturamento/Hora","%Retirada","BaseAtiva","ReceitaTotalMes",
         "TaxaInicios","TaxaReativacao","HorasOperacionais","DiasOperacionais"]
 ESTOQUISTAS_FEATURE_BASE = ["ItensEstoque", "CustoEstoque"]
 ESTOQUISTAS_FEATURE_ENGINEERED = [
@@ -964,7 +974,7 @@ def _prepare_model_data(
                 used_features.append(col)
     if not used_features:
         return None
-    preserve_cols = ["BaseAtiva", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora"]
+    preserve_cols = ["BaseAtiva", "ReceitaTotalMes", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora"]
     if criterio_key == "SalarioMapeadoIAF25" and mode == "ideal":
         preserve_cols.extend(["%IAF25", "SalarioMapeado", "TotalMapeado"])
     used_features = drop_high_correlation(
@@ -986,8 +996,9 @@ def _prepare_model_data(
     X, y = X.loc[mask_valid], y.loc[mask_valid]
     if X.empty:
         return None
-    if mode == "ideal" and criterio_key == "SalarioMapeadoIAF25" and y.notna().sum() >= 10:
-        q_low, q_high = y.quantile([0.02, 0.98])
+    if mode == "ideal" and y.notna().sum() >= 10:
+        q_low, q_high = (0.02, 0.98) if criterio_key == "SalarioMapeadoIAF25" else (0.01, 0.99)
+        q_low, q_high = y.quantile([q_low, q_high])
         if pd.notna(q_low) and pd.notna(q_high) and q_low < q_high:
             y = y.clip(lower=float(q_low), upper=float(q_high))
     X, used_features = _reduce_features_by_mi(X, y, used_features)
@@ -1132,6 +1143,7 @@ def train_auxiliares_model(
     cat_cardinality = getattr(X_full, "attrs", {}).get("categorical_cardinality", {})
     if algo == "catboost":
         loss_mid = "RMSE"
+        criterio_key = get_criterio_mapeado_key() if mode == "ideal" else "TotalMapeado"
         return train_catboost_model(
             X=X,
             y=y,
@@ -1140,6 +1152,7 @@ def train_auxiliares_model(
             categorical_cols=categorical_cols or [],
             sample_weights=sample_weights,
             loss_mid=loss_mid,
+            criterio_key=criterio_key,
         )
     raise ValueError(f"Algoritmo '{algo}' não suportado.")
 def _determine_test_fraction(n_samples: int, desired: float) -> float:
