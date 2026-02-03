@@ -1772,7 +1772,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
                 compute_metrics=mostrar_metricas,
-                metrics_cache_bust=cache_ver,
+                metrics_cache_bust=cache_ver_ideal,
                 skip_cap_cols=skip_cap_cols_ideal,
             )
             resultados_modelos_ideal = [res for res in resultados_modelos_ideal if res.get("key") == "catboost"]
