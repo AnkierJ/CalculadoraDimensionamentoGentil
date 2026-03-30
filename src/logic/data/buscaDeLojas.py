@@ -31,7 +31,7 @@ def _normalize_loja_key(value) -> str:
 
 def _ensure_loja_key(df: Optional[pd.DataFrame], key_col: str = "Loja_norm") -> pd.DataFrame:
     """Garante a existencia de uma coluna normalizada de loja para joins confiaveis."""
-    if df is None or df.empty:
+    if df is None:
         return df
     loja_col = None
     for col in df.columns:

@@ -136,10 +136,22 @@ def safe_float(val, default: float = 0.0):
             return default
         if isinstance(val, str):
             s = val.strip()
-            s = s.replace(".", "").replace(",", ".")
             s = s.replace("%", "").replace("R$", "").strip()
             if s == "":
                 return default
+            s = s.replace(" ", "")
+            if "." in s and "," in s:
+                # Formato pt-BR típico: 1.234,56
+                s = s.replace(".", "").replace(",", ".")
+            elif "," in s:
+                # Decimal com vírgula
+                s = s.replace(",", ".")
+            elif "." in s:
+                # Se só tem ponto e grupos de 3 dígitos, trata como milhar: 1.000 -> 1000
+                parts = s.split(".")
+                if len(parts) > 1 and all(p.isdigit() for p in parts):
+                    if all(len(p) == 3 for p in parts[1:]):
+                        s = "".join(parts)
             return float(s)
         return float(val)
     except (ValueError, TypeError):
@@ -274,16 +286,16 @@ def get_schema_fFaturamento2() -> Dict[str, str]:
     """Schema com os tipos esperados para a planilha fFaturamento2."""
     return {
         "Loja": "string",
-        "CodPedido": "int",
+        "Data": "date",
         "NomeRevendedora": "string",
         "Papel": "string",
-        "DataPedido": "date",
         "HoraPedido": "string",
         "DataAprovacao": "date",
         "HoraAprovacao": "string",
         "DataAutorizacao": "date",
         "HoraAutorizacao": "string",
         "Faturamento": "float",
+        "Boletos": "float",
         "Retirada": "boolean",
         "CicloMarketing": "string",
         "DiaCiclo": "int",
@@ -367,14 +379,9 @@ def _coerce_types(df: pd.DataFrame, schema: Dict[str, str]) -> pd.DataFrame:
                 return str(x).strip()
             df[col] = df[col].map(_to_text).astype("object")
         elif t == "float":
-            numeric = pd.to_numeric(df[col], errors="coerce")
-            mask_nan = numeric.isna()
-            if mask_nan.any():
-                fallback = df.loc[mask_nan, col].apply(lambda v: safe_float(v, np.nan))
-                numeric.loc[mask_nan] = fallback
-            df[col] = numeric.astype(float)
+            df[col] = df[col].apply(lambda v: safe_float(v, np.nan)).astype(float)
         elif t == "int":
-            numeric = pd.to_numeric(df[col], errors="coerce")
+            numeric = df[col].apply(lambda v: safe_float(v, np.nan))
             # Permite entrada com decimais (ex: "1.0") arredondando para o inteiro mais próximo antes de converter
             df[col] = numeric.round().astype("Int64")
         elif t == "boolean":
@@ -384,7 +391,15 @@ def _coerce_types(df: pd.DataFrame, schema: Dict[str, str]) -> pd.DataFrame:
                 s = df[col].astype(str).str.upper().str.strip()
                 df[col] = s.isin(true_vals).astype("boolean")
         elif t == "date":
-            df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True).dt.date
+            raw = df[col]
+            text = raw.astype(str).str.strip()
+            iso_mask = text.str.match(r"^\d{4}[-/]\d{2}[-/]\d{2}($|\s)", na=False)
+            parsed = pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns]")
+            if iso_mask.any():
+                parsed.loc[iso_mask] = pd.to_datetime(text.loc[iso_mask], errors="coerce")
+            if (~iso_mask).any():
+                parsed.loc[~iso_mask] = pd.to_datetime(text.loc[~iso_mask], errors="coerce", dayfirst=True)
+            df[col] = parsed.dt.date
     return df
 
 

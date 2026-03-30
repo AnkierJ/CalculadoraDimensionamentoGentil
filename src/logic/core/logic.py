@@ -15,7 +15,7 @@ import pandas as pd
 from pathlib import Path
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 import numpy as np
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
@@ -179,12 +179,7 @@ def _compute_absenteismo_prefill(row_dict: Dict[str, object]) -> float:
 def _coerce_numeric_series(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype="float64")
-    numeric = pd.to_numeric(series, errors="coerce")
-    mask_nan = numeric.isna()
-    if mask_nan.any():
-        fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
-        numeric.loc[mask_nan] = fallback
-    return numeric
+    return series.apply(lambda v: safe_float(v, float("nan"))).astype(float)
 
 
 def _normalize_iaf_series(values, index: pd.Index) -> pd.Series:
@@ -1153,6 +1148,7 @@ def train_auxiliares_model(
             sample_weights=sample_weights,
             loss_mid=loss_mid,
             criterio_key=criterio_key,
+            mode=mode,
         )
     raise ValueError(f"Algoritmo '{algo}' não suportado.")
 def _determine_test_fraction(n_samples: int, desired: float) -> float:
@@ -1550,6 +1546,48 @@ def evaluate_trained_model(
     if warnings_list:
         metrics["warnings"] = warnings_list
     return metrics
+def _build_cv_strata_labels(
+    train_df: pd.DataFrame,
+    y_values: pd.Series,
+    mode: str,
+    horas_disp: float,
+    margem: float,
+    anchor_quantile: Optional[float],
+) -> pd.Series:
+    y_ser = pd.to_numeric(y_values, errors="coerce")
+    y_ser = pd.Series(y_ser, index=y_values.index)
+    if y_ser.notna().sum() < 4:
+        return pd.Series(["all"] * len(y_ser), index=y_ser.index, dtype="object")
+
+    quantiles = 3 if len(y_ser) >= 18 else 2
+    try:
+        y_bin = pd.qcut(y_ser.rank(method="first"), q=quantiles, labels=False, duplicates="drop")
+    except Exception:
+        y_bin = pd.Series(0, index=y_ser.index, dtype="int64")
+    y_bin = pd.Series(pd.to_numeric(y_bin, errors="coerce").fillna(0).astype(int), index=y_ser.index)
+
+    porte_codes = pd.Series(-1, index=y_ser.index, dtype="int64")
+    try:
+        ctx = _compute_porte_cluster_context(
+            train_df,
+            mode=mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            anchor_quantile=anchor_quantile,
+        )
+    except Exception:
+        ctx = None
+
+    if ctx:
+        porte_map = ctx.get("porte_map", {}) or {}
+        for idx, row in train_df.loc[y_ser.index].iterrows():
+            cid, _, _ = _assign_porte_cluster(row.to_dict(), ctx)
+            porte_codes.loc[idx] = int(porte_map.get(cid, -1)) if cid is not None else -1
+
+    labels = porte_codes.astype(str) + "_" + y_bin.astype(str)
+    return labels.astype("object")
+
+
 def evaluate_model_cv(
     train_df: pd.DataFrame,
     n_splits: int = 5,  # legado
@@ -1559,8 +1597,7 @@ def evaluate_model_cv(
     anchor_quantile: Optional[float] = None,
     algo: Optional[str] = "catboost",
 ) -> Dict[str, object]:
-    """Executa avaliacao hold-out para o CatBoost."""
-    _ = n_splits
+    """Executa validacao cruzada estratificada para o CatBoost."""
     train_df = clean_training_dataframe(train_df)
     if train_df is None or train_df.empty:
         return {}
@@ -1568,33 +1605,92 @@ def evaluate_model_cv(
     if prepared is None:
         return {}
     X_full, y_full, used_features, sample_weights = prepared
-    split = _split_train_test_data(X_full, y_full, sample_weights, test_size=0.25, random_state=42)
-    if split is None:
+    if len(X_full) < 4:
         return {}
+
     algo_name = (algo or "catboost").lower()
     metrics_map: Dict[str, object] = {}
-    try:
-        model = train_auxiliares_model(
-            train_df,
-            mode=mode,
-            horas_disp=horas_disp,
-            margem=margem,
-            algo=algo_name,
-            prepared=(split['X_train'], split['y_train'], used_features, split.get('sample_weight_train')),
-            anchor_quantile=anchor_quantile,
-        )
-    except Exception as exc:
-        metrics_map[algo_name] = {'error': str(exc)}
+
+    train_for_strata = train_df.loc[X_full.index] if set(X_full.index).issubset(set(train_df.index)) else train_df.copy()
+    strata = _build_cv_strata_labels(train_for_strata, y_full, mode, horas_disp, margem, anchor_quantile)
+
+    splitter = None
+    if strata is not None and len(strata) == len(X_full):
+        counts = strata.value_counts(dropna=False)
+        min_count = int(counts.min()) if not counts.empty else 0
+        splits_by_class = max(2, min_count) if min_count > 0 else 0
+        n_splits_eff = min(max(2, n_splits), splits_by_class) if splits_by_class else 0
+        if n_splits_eff >= 2 and strata.nunique(dropna=False) > 1:
+            splitter = StratifiedKFold(n_splits=n_splits_eff, shuffle=True, random_state=42)
+
+    if splitter is None:
+        n_splits_eff = min(max(2, n_splits), len(X_full))
+        if n_splits_eff < 2:
+            return {}
+        split_iter = KFold(n_splits=n_splits_eff, shuffle=True, random_state=42).split(X_full)
     else:
+        split_iter = splitter.split(X_full, strata)
+
+    fold_metrics: List[Dict[str, object]] = []
+    for train_idx, test_idx in split_iter:
+        X_train = X_full.iloc[train_idx]
+        y_train = y_full.iloc[train_idx]
+        X_test = X_full.iloc[test_idx]
+        y_test = y_full.iloc[test_idx]
+        sw_train = sample_weights.iloc[train_idx] if isinstance(sample_weights, pd.Series) else pd.Series(1.0, index=X_train.index)
+
+        try:
+            model = train_auxiliares_model(
+                train_df,
+                mode=mode,
+                horas_disp=horas_disp,
+                margem=margem,
+                algo=algo_name,
+                prepared=(X_train, y_train, used_features, sw_train),
+                anchor_quantile=anchor_quantile,
+            )
+        except Exception as exc:
+            fold_metrics.append({"error": str(exc)})
+            continue
+
         if model is None:
-            metrics_map[algo_name] = {'error': 'Modelo indisponivel para avaliacao.'}
-        else:
-            metrics_map[algo_name] = evaluate_trained_model(
+            fold_metrics.append({"error": "Modelo indisponivel para avaliacao."})
+            continue
+
+        fold_metrics.append(
+            evaluate_trained_model(
                 MODEL_ALGO_NAMES.get(algo_name, algo_name),
                 model,
-                split['X_test'],
-                split['y_test'],
+                X_test,
+                y_test,
             )
+        )
+
+    valid_folds = [m for m in fold_metrics if isinstance(m, dict) and "error" not in m]
+    if not valid_folds:
+        first_err = next((m.get("error") for m in fold_metrics if isinstance(m, dict) and m.get("error")), "Falha na validacao cruzada.")
+        metrics_map[algo_name] = {"error": first_err}
+    else:
+        metric_keys = ["R2", "MAE", "RMSE", "MAPE", "SMAPE", "Precisao", "Precisao_percent"]
+        agg: Dict[str, object] = {
+            "model_name": MODEL_ALGO_NAMES.get(algo_name, algo_name),
+            "n_folds": len(valid_folds),
+            "n_test": int(sum(int(m.get("n_test", 0) or 0) for m in valid_folds)),
+        }
+        for key in metric_keys:
+            vals = [safe_float(m.get(key), np.nan) for m in valid_folds]
+            vals = [v for v in vals if np.isfinite(v)]
+            agg[key] = float(np.mean(vals)) if vals else np.nan
+        agg["R2_mean"] = agg.get("R2", np.nan)
+        warnings_joined: List[str] = []
+        for m in valid_folds:
+            w = m.get("warnings")
+            if isinstance(w, list):
+                warnings_joined.extend([str(x) for x in w if x])
+        if warnings_joined:
+            agg["warnings"] = sorted(set(warnings_joined))
+        metrics_map[algo_name] = agg
+
     if algo is None:
         return metrics_map
     return metrics_map.get(algo_name, {})
@@ -1629,6 +1725,7 @@ def predict_with_uncertainty(
     margem: float = 0.15,
     anchor_quantile: Optional[float] = None,
     algo: str = "catboost",
+    model: Optional[object] = None,
 ) -> Dict[str, float]:
     """Aplica quantile regression do CatBoost para estimar o IC de 98% pré-fila."""
     train_df = clean_training_dataframe(train_df)
@@ -1637,15 +1734,17 @@ def predict_with_uncertainty(
     prepared_full = _prepare_model_data(train_df, mode, horas_disp, margem, anchor_quantile)
     if prepared_full is None:
         return {}
-    model_cat = train_auxiliares_model(
-        train_df,
-        mode=mode,
-        horas_disp=horas_disp,
-        margem=margem,
-        algo="catboost",
-        prepared=prepared_full,
-        anchor_quantile=anchor_quantile,
-    )
+    model_cat = model
+    if model_cat is None:
+        model_cat = train_auxiliares_model(
+            train_df,
+            mode=mode,
+            horas_disp=horas_disp,
+            margem=margem,
+            algo="catboost",
+            prepared=prepared_full,
+            anchor_quantile=anchor_quantile,
+        )
     if not isinstance(model_cat, CatBoostQuantileModel):
         return {}
     try:
@@ -2284,15 +2383,24 @@ def load_csv_path(path: str, schema: Dict[str, str], aliases: Optional[Dict[str,
     if not os.path.exists(path):
         return create_empty_from_schema(schema)
     detected_sep = None
+    header_line = ""
     try:
         with open(path, "r", encoding="utf-8-sig", errors="ignore") as fh:
+            header_line = fh.readline()
             sample = fh.read(2048)
-            try:
-                detected_sep = csv.Sniffer().sniff(sample).delimiter
-            except Exception:
-                pass
     except Exception:
-        detected_sep = None
+        header_line = ""
+        sample = ""
+    # Prioriza o separador do cabeçalho para evitar falso positivo por vírgulas decimais.
+    if ";" in header_line:
+        detected_sep = ";"
+    elif "," in header_line:
+        detected_sep = ","
+    else:
+        try:
+            detected_sep = csv.Sniffer().sniff(sample).delimiter if sample else None
+        except Exception:
+            detected_sep = None
     sep_kwargs = {"sep": detected_sep or ","}
     encodings_to_try = ["utf-8-sig", "utf-8", "latin-1"]
     df = None
@@ -2432,12 +2540,7 @@ def _is_total_like_token(value: object) -> bool:
 def _parse_ptbr_numeric_series(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype="float64")
-    numeric = pd.to_numeric(series, errors="coerce")
-    mask_nan = numeric.isna()
-    if mask_nan.any():
-        fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
-        numeric.loc[mask_nan] = fallback
-    return numeric.astype(float)
+    return series.apply(lambda v: safe_float(v, float("nan"))).astype(float)
 
 
 def _drop_total_rows_for_upload(df: pd.DataFrame, nome: str) -> pd.DataFrame:
@@ -2472,14 +2575,19 @@ def _derive_faturamento_orders(faturamento_df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     pedidos_count = None
+    cod_serie = pd.Series(dtype="float64")
+    cod_valido = False
     if "CodPedido" in df.columns:
-        cod = pd.to_numeric(df["CodPedido"], errors="coerce")
-        df["_cod"] = cod
-        missing = cod.isna()
+        cod_serie = pd.to_numeric(df["CodPedido"], errors="coerce")
+        cod_valido = cod_serie.notna().any()
+    if cod_valido:
+        df["_cod"] = cod_serie
+        missing = cod_serie.isna()
         if missing.any():
             df.loc[missing, "_cod"] = np.arange(len(df))[missing]
         pedidos_count = pd.Series(1.0, index=df.index, dtype="float64")
     else:
+        # Sem CodPedido válido, trata as linhas como agregadas e usa Boletos/Pedidos.
         df["_cod"] = np.arange(len(df))
         if "Boletos" in df.columns:
             pedidos_count = _parse_ptbr_numeric_series(df["Boletos"])
@@ -2498,9 +2606,15 @@ def _derive_faturamento_orders(faturamento_df: pd.DataFrame) -> pd.DataFrame:
     if "Itens" in df.columns:
         df["Itens"] = _parse_ptbr_numeric_series(df["Itens"])
         agg_map["Itens"] = "sum"
+    if "Boletos" in df.columns:
+        df["Boletos"] = _parse_ptbr_numeric_series(df["Boletos"])
+        agg_map["Boletos"] = "sum"
     if "Retirada" in df.columns:
         agg_map["Retirada"] = "max"
+    data_pedido_valida = False
     if "DataPedido" in df.columns:
+        data_pedido_valida = pd.to_datetime(df["DataPedido"], errors="coerce").notna().any()
+    if data_pedido_valida:
         agg_map["DataPedido"] = "min"
     elif "Data" in df.columns:
         df["DataPedido"] = df["Data"]
@@ -2553,6 +2667,11 @@ def derive_indicadores_from_faturamento(
         res["ItensTotal"] = orders.groupby("Loja")["Itens"].sum()
     else:
         res["ItensTotal"] = 0.0
+    if "Boletos" in orders.columns:
+        res["BoletosTotal"] = orders.groupby("Loja")["Boletos"].sum()
+    else:
+        # Fallback para bases sem coluna Boletos.
+        res["BoletosTotal"] = res["Pedidos"]
     dias_series = pd.Series(np.nan, index=res.index, dtype="float64")
     if "DataPedido" in orders.columns:
         dias = pd.to_datetime(orders["DataPedido"], errors="coerce").dt.date
@@ -2600,23 +2719,41 @@ def derive_indicadores_from_faturamento(
                 horas_series = horas_df.groupby("Loja")["_hora"].nunique().astype(float)
     dias_total = dias_series.reindex(res.index)
     dias_total = dias_total.where(dias_total > 0, np.nan)
-    horas_total = horas_series.reindex(res.index)
-    horas_fallback = dias_total * horas_loja
-    horas_total = horas_total.where(horas_total > 0, horas_fallback)
+    dias_operacionais_mes = pd.Series(np.nan, index=res.index, dtype="float64")
+    if estrutura_df is not None and not estrutura_df.empty and "Loja" in estrutura_df.columns:
+        estrutura_norm = _ensure_loja_key(estrutura_df.copy())
+        if "DiasOperacionaisMes" in estrutura_norm.columns:
+            dias_op_raw = pd.to_numeric(estrutura_norm["DiasOperacionaisMes"], errors="coerce")
+            dias_op_raw = dias_op_raw.where(dias_op_raw > 0, np.nan)
+            dias_map = pd.DataFrame(
+                {"Loja_norm": estrutura_norm.get("Loja_norm"), "_dias_op_mes": dias_op_raw}
+            ).dropna(subset=["Loja_norm"])
+            if not dias_map.empty:
+                dias_map = dias_map.groupby("Loja_norm", as_index=False)["_dias_op_mes"].mean()
+                res_norm = _ensure_loja_key(res.reset_index()[["Loja"]])
+                res_norm = res_norm.merge(dias_map, on="Loja_norm", how="left")
+                dias_operacionais_mes = pd.to_numeric(res_norm["_dias_op_mes"], errors="coerce")
+                dias_operacionais_mes.index = res.index
+    dias_operacionais_mes = dias_operacionais_mes.where(dias_operacionais_mes > 0, dias_total)
+    dias_operacionais_mes = dias_operacionais_mes.where(dias_operacionais_mes > 0, np.nan)
     pedidos = res["Pedidos"].fillna(0.0).astype(float)
     receita = res["ReceitaTotalMes"].fillna(0.0).astype(float)
     itens_total = res["ItensTotal"].fillna(0.0).astype(float)
+    boletos_total = res["BoletosTotal"].fillna(0.0).astype(float)
     ticket_medio = receita_total / pedidos.replace(0, np.nan)
     pedidos_dia = (pedidos / dias_total).replace([np.inf, -np.inf], np.nan)
     # Regra de negócio: pedidos/hora = pedidos/dia dividido por horas operacionais da loja
     pedidos_hora = (pedidos_dia / horas_loja.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    horas_mes_operacionais = (dias_operacionais_mes * horas_loja).replace([np.inf, -np.inf], np.nan)
     res["Pedidos/Dia"] = pedidos_dia.fillna(0.0)
     res["Pedidos/Hora"] = pedidos_hora.fillna(0.0)
-    res["Faturamento/Hora"] = (receita / horas_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    res["Itens/Pedido"] = (itens_total / pedidos.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    # Regra de negócio: ReceitaTotalMes / (DiasOperacionaisMes * HorasOperacionais)
+    res["Faturamento/Hora"] = (receita / horas_mes_operacionais.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    # Regra de negócio: Itens/Pedido = total de itens / total de boletos por loja.
+    res["Itens/Pedido"] = (itens_total / boletos_total.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
     res["ReaisPorAtivo"] = ticket_medio.replace([np.inf, -np.inf], np.nan)
     res = res.reset_index()
-    res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal"] if c in res.columns])
+    res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal", "BoletosTotal"] if c in res.columns])
     return res
 
 
@@ -2635,9 +2772,12 @@ def merge_indicadores_from_faturamento(
         base = indicadores_df.copy()
     if "Loja" not in base.columns:
         base["Loja"] = ""
+    if "Loja" not in derived.columns:
+        derived["Loja"] = ""
     base = _ensure_loja_key(base)
     derived = _ensure_loja_key(derived)
-    merged = base.merge(derived, on="Loja_norm", how="outer", suffixes=("", "_ffat"))
+    join_key = "Loja_norm" if ("Loja_norm" in base.columns and "Loja_norm" in derived.columns) else "Loja"
+    merged = base.merge(derived, on=join_key, how="outer", suffixes=("", "_ffat"))
     if "Loja" in merged.columns and "Loja_ffat" in merged.columns:
         merged["Loja"] = merged["Loja"].combine_first(merged["Loja_ffat"])
         merged = merged.drop(columns=["Loja_ffat"])
@@ -2794,7 +2934,7 @@ CRITICAL_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
     "dAmostras": ["Loja", "Processo", "Amostra", "Minutos"],
     "dEstrutura": ["Loja", "Area Total", "Caixas", "Esp Conv", "Copa", "Escritorio", "Shopping", "HorasOperacionais"],
     "dPessoas": ["Loja", "QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "%disp"],
-    "fFaturamento2": ["Loja", "Data", "DataPedido", "Faturamento", "Itens", "Boletos", "CodPedido"],
+    "fFaturamento2": ["Loja", "Data", "Faturamento", "Itens", "Boletos"],
     "fIndicadores": [
         "BCPS", "SAP", "Estado", "Praça", "Loja", "BaseTotal", "BaseAtiva", "Churn", "ReceitaTotalMes",
         "ReaisPorAtivo", "AtividadeER", "A0", "A1aA3", "I4aI6", "Inicios", "Reinicios", "Recuperados",
@@ -2857,7 +2997,12 @@ def _upsert_critical_columns(
             new_local[col] = pd.NA
     working = _ensure_loja_key(working) if "Loja" in working.columns else working
     new_local = _ensure_loja_key(new_local) if "Loja" in new_local.columns else new_local
-    if "Loja_norm" in working.columns and "Loja" in keys:
+    # Usa chave normalizada apenas quando ambos os lados a possuem.
+    if (
+        "Loja" in keys
+        and "Loja_norm" in working.columns
+        and "Loja_norm" in new_local.columns
+    ):
         keys = [("Loja_norm" if k == "Loja" else k) for k in keys]
     key_critical = [c for c in critical_cols if c in working.columns and c in new_local.columns and c not in keys]
     base_non_critical = [c for c in working.columns if c not in key_critical]
@@ -3124,11 +3269,17 @@ def preparar_indicadores_operacionais(
     has_lookup: bool = False,
     prefer_manual: bool = False,
 ) -> Dict[str, object]:
-    base_total_den = total_base_ref if total_base_ref and total_base_ref > 0 else None
+    base_total_lookup = 0.0
+    if lookup_row:
+        base_total_lookup = safe_float(get_lookup(lookup_row, "BaseTotal"), 0.0)
+    base_total_den = base_total_lookup if base_total_lookup > 0 else (total_base_ref if total_base_ref and total_base_ref > 0 else None)
     receita_total_den = total_receita_ref if total_receita_ref and total_receita_ref > 0 else (receita_total if receita_total > 0 else None)
-    pct_base_total = calc_pct(base_ativa, base_total_den)
+    pct_base_total_lookup = 0.0
+    if lookup_row:
+        pct_base_total_lookup = safe_float(get_lookup(lookup_row, "%daBaseTotal"), 0.0)
+    pct_base_total = pct_base_total_lookup if pct_base_total_lookup > 0 else calc_pct(base_ativa, base_total_den)
     pct_faturamento = calc_pct(receita_total, receita_total_den)
-    pct_ativos = calc_pct(base_ativa, base_ativa if base_ativa > 0 else None)
+    pct_ativos = calc_pct(base_ativa, base_total_den)
     taxa_inicios = calc_pct(inicios, base_ativa if base_ativa > 0 else None)
     taxa_reativacao = calc_pct(recuperados, i4_a_i6)
     taxa_reinicio = calc_pct(reinicios, base_ativa if base_ativa > 0 else None)
@@ -3391,6 +3542,7 @@ def calcular_intervalos_modelos(
     anchor_quantile: Optional[float] = None,
     apply_cluster_blend: bool = True,
     skip_cap_cols: Optional[List[str]] = None,
+    model_bundle: Optional[Dict[str, object]] = None,
 ) -> Dict[str, Dict[str, float]]:
     intervalos: Dict[str, Dict[str, float]] = {}
     feature_bounds = _feature_bounds_from_train(train_df)
@@ -3405,6 +3557,7 @@ def calcular_intervalos_modelos(
             anchor_quantile=anchor_quantile,
         )
     for key in algo_keys:
+        model_ref = ((model_bundle or {}).get("models") or {}).get(key)
         ci = predict_with_uncertainty(
             train_df,
             capped_features,
@@ -3415,6 +3568,7 @@ def calcular_intervalos_modelos(
             margem=margem,
             anchor_quantile=anchor_quantile,
             algo=key,
+            model=model_ref,
         )
         if ci and cluster_ctx is not None:
             pred_base = ci.get("pred_mean", ci.get("ci_mid_disp"))

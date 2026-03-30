@@ -5,6 +5,7 @@ import math
 import zlib
 import html
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -1200,7 +1201,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
             with st.expander("Indicadores derivados (cálculo automático)"):
                 colDer1, colDer2, colDer3 = st.columns(3)
                 with colDer1:
-                    st.metric("% da Base Ativa total", f"{pct_base_total:.2f}%")
+                    st.metric("% da Base Total", f"{pct_base_total:.2f}%")
                     st.metric("Taxa Inícios", f"{taxa_inicios:.2f}%")
                 with colDer2:
                     st.metric("% Ativos", f"{pct_ativos:.2f}%")
@@ -1666,14 +1667,27 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
         criterio_hash = zlib.adler32(str(criterio_key).encode("utf-8")) % 10000
         cache_ver_hist = 9 + (CATBOOST_PARAM_VERSION * 1000)
         cache_ver_ideal = 9 + int(anchor_quantile * 100) + (CATBOOST_PARAM_VERSION * 1000) + criterio_hash
-        model_bundle_hist = _train_cached(
-            train_df,
-            "historico",
-            horas_disp,
-            margem,
-            anchor_quantile=anchor_quantile,
-            cache_version=cache_ver_hist,
-        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut_hist = executor.submit(
+                _train_cached,
+                train_df,
+                "historico",
+                horas_disp,
+                margem,
+                anchor_quantile,
+                cache_ver_hist,
+            )
+            fut_ideal = executor.submit(
+                _train_cached,
+                train_df,
+                "ideal",
+                horas_disp,
+                margem,
+                anchor_quantile,
+                cache_ver_ideal,
+            )
+            model_bundle_hist = fut_hist.result()
+            model_bundle_ideal = fut_ideal.result()
         def _warn_model_issue(bundle: Optional[Dict[str, object]], label: str) -> None:
             errors = (bundle or {}).get("errors") or {}
             msg = errors.get("catboost") or errors.get("_geral")
@@ -1681,14 +1695,6 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 st.warning(f"Modelo {label} indisponivel: {msg}")
         _warn_model_issue(model_bundle_hist, "historico")
         _warn_model_issue(model_bundle_ideal, "ideal")
-        model_bundle_ideal = _train_cached(
-            train_df,
-            "ideal",
-            horas_disp,
-            margem,
-            anchor_quantile=anchor_quantile,
-            cache_version=cache_ver_ideal,
-        )
 
     estrutura_df = st.session_state.get("dEstrutura")
     pessoas_df = st.session_state.get("dPessoas")
@@ -1814,6 +1820,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 ["catboost"],
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
+                model_bundle=model_bundle_hist,
             ).get("catboost", {})
         if mostrar_metricas and cat_ideal:
             ci_ideal = calcular_intervalos_modelos(
@@ -1826,6 +1833,7 @@ def render_calc_tab(tab_calc: DeltaGenerator) -> Dict[str, object]:
                 anchor_quantile=anchor_quantile,
                 apply_cluster_blend=False,
                 skip_cap_cols=skip_cap_cols_ideal,
+                model_bundle=model_bundle_ideal,
             ).get("catboost", {})
 
         if cat_hist and cat_ideal:

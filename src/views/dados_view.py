@@ -153,7 +153,7 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                 crit, der = get_upload_column_rules("fFaturamento2")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
                 st.caption("Colunas derivadas impactadas em outras bases são recalculadas automaticamente.")
-                render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "CodPedido", "Data", "DataPedido"])
+                render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "Data"])
             with tabs[4]:
                 crit, der = get_upload_column_rules("fIndicadores")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
@@ -235,13 +235,19 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
 
             train_norm = _ensure_loja_key(train_df)
             praca_col = _find_praca_col(indicadores_df) if indicadores_df is not None else None
-            if indicadores_df is not None and not indicadores_df.empty and praca_col:
+            if (
+                indicadores_df is not None
+                and not indicadores_df.empty
+                and praca_col
+                and "Loja_norm" in train_norm.columns
+            ):
                 indicadores_norm = _ensure_loja_key(indicadores_df)
-                base_praca = indicadores_norm[[praca_col, "Loja_norm"]].copy()
-                base_praca[praca_col] = base_praca[praca_col].astype(str).str.strip()
-                base_praca = base_praca[base_praca[praca_col] != ""]
-                base_praca = base_praca.dropna(subset=["Loja_norm"]).drop_duplicates("Loja_norm")
-                train_norm = train_norm.merge(base_praca, on="Loja_norm", how="left")
+                if "Loja_norm" in indicadores_norm.columns:
+                    base_praca = indicadores_norm[[praca_col, "Loja_norm"]].copy()
+                    base_praca[praca_col] = base_praca[praca_col].astype(str).str.strip()
+                    base_praca = base_praca[base_praca[praca_col] != ""]
+                    base_praca = base_praca.dropna(subset=["Loja_norm"]).drop_duplicates("Loja_norm")
+                    train_norm = train_norm.merge(base_praca, on="Loja_norm", how="left")
 
             receita = (
                 pd.to_numeric(train_norm["ReceitaTotalMes"], errors="coerce")
