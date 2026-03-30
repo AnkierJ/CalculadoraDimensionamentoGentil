@@ -11,23 +11,23 @@ Nevaldo Rocha;Reposição de prateleira;5;3,033;3,069;1,545;8
 Nevaldo Rocha;Reposição de prateleira;6;4,05;3,069;1,545;8
 Nevaldo Rocha;Reposição de prateleira;7;2,833;3,069;1,545;8
 Nevaldo Rocha;Reposição de prateleira;8;1,567;3,069;1,545;8
-Nevaldo Rocha;Abertura e acompanhamento de chamado;1;40;40;0;1
-Nevaldo Rocha;Elaboração de calendário do ciclo e divulgação;1;60;60;0;1
-Nevaldo Rocha;Encontro de ciclo;1;40;40;0;1
-Nevaldo Rocha;Eventos para os revendedores;1;225;225;0;1
-Nevaldo Rocha;Atualização de cadastro de revendedor ;1;7,267;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;2;3,85;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;3;23,017;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;4;10,1;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;5;12,083;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;6;6,533;9,295;6,931;7
-Nevaldo Rocha;Atualização de cadastro de revendedor ;7;2,217;9,295;6,931;7
-Nevaldo Rocha;Cadastro de revendedor ;1;5,617;10,517;3,859;6
-Nevaldo Rocha;Cadastro de revendedor ;2;15,1;10,517;3,859;6
-Nevaldo Rocha;Cadastro de revendedor ;3;9,167;10,517;3,859;6
-Nevaldo Rocha;Cadastro de revendedor ;4;14,817;10,517;3,859;6
-Nevaldo Rocha;Cadastro de revendedor ;5;7,517;10,517;3,859;6
-Nevaldo Rocha;Cadastro de revendedor ;6;10,883;10,517;3,859;6
+Nevaldo Rocha;Abertura e acompanhamento de chamado;1;40,0;40,0;0,0;1
+Nevaldo Rocha;Elaboração de calendário do ciclo e divulgação;1;60,0;60,0;0,0;1
+Nevaldo Rocha;Encontro de ciclo;1;40,0;40,0;0,0;1
+Nevaldo Rocha;Eventos para os revendedores;1;225,0;225,0;0,0;1
+Nevaldo Rocha;Atualização de cadastro de revendedor;1;7,267;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;2;3,85;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;3;23,017;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;4;10,1;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;5;12,083;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;6;6,533;9,295;6,931;7
+Nevaldo Rocha;Atualização de cadastro de revendedor;7;2,217;9,295;6,931;7
+Nevaldo Rocha;Cadastro de revendedor;1;5,617;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor;2;15,1;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor;3;9,167;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor;4;14,817;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor;5;7,517;10,517;3,859;6
+Nevaldo Rocha;Cadastro de revendedor;6;10,883;10,517;3,859;6
 Nevaldo Rocha;Faturamente de pedido (retirada e delivery);1;18,467;9,254;6,429;4
 Nevaldo Rocha;Faturamente de pedido (retirada e delivery);2;7,417;9,254;6,429;4
 Nevaldo Rocha;Faturamente de pedido (retirada e delivery);3;7,633;9,254;6,429;4
@@ -44,10 +44,10 @@ Nevaldo Rocha;Venda em caixa;2;21,8;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;3;9,567;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;4;10,133;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;5;19,717;11,102;6,041;20
-Nevaldo Rocha;Venda em caixa;6;13;11,102;6,041;20
-Nevaldo Rocha;Venda em caixa;7;14;11,102;6,041;20
-Nevaldo Rocha;Venda em caixa;8;8;11,102;6,041;20
-Nevaldo Rocha;Venda em caixa;9;13;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;6;13,0;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;7;14,0;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;8;8,0;11,102;6,041;20
+Nevaldo Rocha;Venda em caixa;9;13,0;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;10;7,083;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;11;9,25;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;12;4,933;11,102;6,041;20
@@ -59,38 +59,38 @@ Nevaldo Rocha;Venda em caixa;17;8,833;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;18;9,517;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;19;6,667;11,102;6,041;20
 Nevaldo Rocha;Venda em caixa;20;28,25;11,102;6,041;20
-Nevaldo Rocha;Atendimento ao cliente ;1;6,333;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;2;1,933;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;3;5,1;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;4;14,45;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;5;1,333;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;6;0,833;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;7;4,833;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;8;2,833;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;9;1,167;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;10;0,867;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;11;3,65;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;12;6,15;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;13;5,25;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;14;3,483;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;15;3,1;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;16;1,117;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;17;13,667;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;18;1,167;4,365;3,906;19
-Nevaldo Rocha;Atendimento ao cliente ;19;5,667;4,365;3,906;19
-Parnamirim;Reposição de prateleira;1;11,333;11,333;0;1
-Parnamirim;Criação de conteúdo;1;20;20;0;1
-Parnamirim;Elaboração de calendário do ciclo e divulgação;1;20;20;0;1
-Parnamirim;Encontro de ciclo;1;330;330;0;1
-Parnamirim;Eventos para os revendedores;1;150;150;0;1
-Parnamirim;Produção de flyer ;1;15;15;0;1
-Parnamirim;Atualização de cadastro de revendedor ;1;2,583;2,583;0;1
-Parnamirim;Cadastro de revendedor ;1;7,667;7,667;0;1
+Nevaldo Rocha;Atendimento ao cliente;1;6,333;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;2;1,933;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;3;5,1;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;4;14,45;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;5;1,333;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;6;0,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;7;4,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;8;2,833;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;9;1,167;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;10;0,867;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;11;3,65;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;12;6,15;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;13;5,25;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;14;3,483;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;15;3,1;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;16;1,117;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;17;13,667;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;18;1,167;4,365;3,906;19
+Nevaldo Rocha;Atendimento ao cliente;19;5,667;4,365;3,906;19
+Parnamirim;Reposição de prateleira;1;11,333;11,333;0,0;1
+Parnamirim;Criação de conteúdo;1;20,0;20,0;0,0;1
+Parnamirim;Elaboração de calendário do ciclo e divulgação;1;20,0;20,0;0,0;1
+Parnamirim;Encontro de ciclo;1;330,0;330,0;0,0;1
+Parnamirim;Eventos para os revendedores;1;150,0;150,0;0,0;1
+Parnamirim;Produção de flyer;1;15,0;15,0;0,0;1
+Parnamirim;Atualização de cadastro de revendedor;1;2,583;2,583;0,0;1
+Parnamirim;Cadastro de revendedor;1;7,667;7,667;0,0;1
 Parnamirim;Venda em caixa;1;9,433;13,705;7,999;14
 Parnamirim;Venda em caixa;2;7,7;13,705;7,999;14
 Parnamirim;Venda em caixa;3;23,667;13,705;7,999;14
 Parnamirim;Venda em caixa;4;25,767;13,705;7,999;14
-Parnamirim;Venda em caixa;5;8;13,705;7,999;14
+Parnamirim;Venda em caixa;5;8,0;13,705;7,999;14
 Parnamirim;Venda em caixa;6;16,833;13,705;7,999;14
 Parnamirim;Venda em caixa;7;7,833;13,705;7,999;14
 Parnamirim;Venda em caixa;8;12,667;13,705;7,999;14
@@ -100,77 +100,77 @@ Parnamirim;Venda em caixa;11;28,417;13,705;7,999;14
 Parnamirim;Venda em caixa;12;17,05;13,705;7,999;14
 Parnamirim;Venda em caixa;13;4,833;13,705;7,999;14
 Parnamirim;Venda em caixa;14;18,05;13,705;7,999;14
-Parnamirim;Atendimento ao cliente ;1;11,267;12,738;7,911;4
-Parnamirim;Atendimento ao cliente ;2;2,95;12,738;7,911;4
-Parnamirim;Atendimento ao cliente ;3;22;12,738;7,911;4
-Parnamirim;Atendimento ao cliente ;4;14,733;12,738;7,911;4
+Parnamirim;Atendimento ao cliente;1;11,267;12,738;7,911;4
+Parnamirim;Atendimento ao cliente;2;2,95;12,738;7,911;4
+Parnamirim;Atendimento ao cliente;3;22,0;12,738;7,911;4
+Parnamirim;Atendimento ao cliente;4;14,733;12,738;7,911;4
 Parnamirim;Atendimento online;1;11,217;5,142;4,073;4
 Parnamirim;Atendimento online;2;3,45;5,142;4,073;4
 Parnamirim;Atendimento online;3;3,4;5,142;4,073;4
 Parnamirim;Atendimento online;4;2,5;5,142;4,073;4
-Extremoz;Mudança de planograma ;1;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;2;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;3;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;4;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;5;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;6;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;7;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;8;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;9;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;10;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;11;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;12;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;13;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;14;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;15;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;16;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;17;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;18;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;19;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;20;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;21;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;22;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;23;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;24;3,666;3,666;0;25
-Extremoz;Mudança de planograma ;25;3,666;3,666;0;25
+Extremoz;Mudança de planograma;1;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;2;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;3;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;4;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;5;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;6;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;7;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;8;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;9;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;10;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;11;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;12;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;13;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;14;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;15;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;16;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;17;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;18;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;19;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;20;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;21;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;22;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;23;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;24;3,666;3,666;0,0;25
+Extremoz;Mudança de planograma;25;3,666;3,666;0,0;25
 Extremoz;Reposição de prateleira;1;19,5;15,225;3,042;4
 Extremoz;Reposição de prateleira;2;15,233;15,225;3,042;4
 Extremoz;Reposição de prateleira;3;13,483;15,225;3,042;4
 Extremoz;Reposição de prateleira;4;12,683;15,225;3,042;4
-Extremoz;Criação de conteúdo;1;30;30;0;1
-Extremoz;Encontro de ciclo;1;80;80;0;1
-Extremoz;Limpeza da ER ;1;20;20;0;1
-Extremoz;Limpeza dos banheiros ;1;15;15;0;1
-Extremoz;Cadastro de revendedor ;1;5,817;5,817;0;1
-Extremoz;Faturamente de pedido (retirada e delivery);1;3,5;3,5;0;1
+Extremoz;Criação de conteúdo;1;30,0;30,0;0,0;1
+Extremoz;Encontro de ciclo;1;80,0;80,0;0,0;1
+Extremoz;Limpeza da ER;1;20,0;20,0;0,0;1
+Extremoz;Limpeza dos banheiros;1;15,0;15,0;0,0;1
+Extremoz;Cadastro de revendedor;1;5,817;5,817;0,0;1
+Extremoz;Faturamente de pedido (retirada e delivery);1;3,5;3,5;0,0;1
 Extremoz;Separação de mercadoria (on-line e retirada);1;3,6;5,328;1,833;3
 Extremoz;Separação de mercadoria (on-line e retirada);2;7,25;5,328;1,833;3
 Extremoz;Separação de mercadoria (on-line e retirada);3;5,133;5,328;1,833;3
 Extremoz;Venda em caixa;1;9,833;12,915;5,118;8
 Extremoz;Venda em caixa;2;18,25;12,915;5,118;8
 Extremoz;Venda em caixa;3;15,25;12,915;5,118;8
-Extremoz;Venda em caixa;4;19;12,915;5,118;8
+Extremoz;Venda em caixa;4;19,0;12,915;5,118;8
 Extremoz;Venda em caixa;5;17,667;12,915;5,118;8
 Extremoz;Venda em caixa;6;8,567;12,915;5,118;8
 Extremoz;Venda em caixa;7;7,25;12,915;5,118;8
 Extremoz;Venda em caixa;8;7,5;12,915;5,118;8
-Extremoz;Atendimento ao cliente ;1;1,667;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;2;2,117;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;3;3,667;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;4;1,167;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;5;1,333;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;6;4;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;7;3,45;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;8;1,083;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;9;3,5;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;10;2,917;2,62;1,163;11
-Extremoz;Atendimento ao cliente ;11;3,917;2,62;1,163;11
+Extremoz;Atendimento ao cliente;1;1,667;2,62;1,163;11
+Extremoz;Atendimento ao cliente;2;2,117;2,62;1,163;11
+Extremoz;Atendimento ao cliente;3;3,667;2,62;1,163;11
+Extremoz;Atendimento ao cliente;4;1,167;2,62;1,163;11
+Extremoz;Atendimento ao cliente;5;1,333;2,62;1,163;11
+Extremoz;Atendimento ao cliente;6;4,0;2,62;1,163;11
+Extremoz;Atendimento ao cliente;7;3,45;2,62;1,163;11
+Extremoz;Atendimento ao cliente;8;1,083;2,62;1,163;11
+Extremoz;Atendimento ao cliente;9;3,5;2,62;1,163;11
+Extremoz;Atendimento ao cliente;10;2,917;2,62;1,163;11
+Extremoz;Atendimento ao cliente;11;3,917;2,62;1,163;11
 Extremoz;Atendimento online;1;6,467;6,65;0,259;2
 Extremoz;Atendimento online;2;6,833;6,65;0,259;2
-Extremoz;Ativações on-line (Cessados);1;30;30;0;1
-Partage;Reposição de prateleira;1;1,45;1,45;0;1
-Partage;Cadastro de revendedor ;1;13;21,5;12,021;2
-Partage;Cadastro de revendedor ;2;30;21,5;12,021;2
+Extremoz;Ativações on-line (Cessados);1;30,0;30,0;0,0;1
+Partage;Reposição de prateleira;1;1,45;1,45;0,0;1
+Partage;Cadastro de revendedor;1;13,0;21,5;12,021;2
+Partage;Cadastro de revendedor;2;30,0;21,5;12,021;2
 Partage;Faturamente de pedido (retirada e delivery);1;13,783;7,147;3,401;6
 Partage;Faturamente de pedido (retirada e delivery);2;6,867;7,147;3,401;6
 Partage;Faturamente de pedido (retirada e delivery);3;6,467;7,147;3,401;6
@@ -182,7 +182,7 @@ Partage;Venda em caixa;2;10,583;15,19;10,074;15
 Partage;Venda em caixa;3;16,833;15,19;10,074;15
 Partage;Venda em caixa;4;16,417;15,19;10,074;15
 Partage;Venda em caixa;5;20,333;15,19;10,074;15
-Partage;Venda em caixa;6;35;15,19;10,074;15
+Partage;Venda em caixa;6;35,0;15,19;10,074;15
 Partage;Venda em caixa;7;12,217;15,19;10,074;15
 Partage;Venda em caixa;8;5,933;15,19;10,074;15
 Partage;Venda em caixa;9;6,8;15,19;10,074;15
@@ -192,35 +192,35 @@ Partage;Venda em caixa;12;7,6;15,19;10,074;15
 Partage;Venda em caixa;13;11,283;15,19;10,074;15
 Partage;Venda em caixa;14;39,3;15,19;10,074;15
 Partage;Venda em caixa;15;14,35;15,19;10,074;15
-Partage;Atendimento ao cliente ;1;6,8;16,464;11,543;11
-Partage;Atendimento ao cliente ;2;5;16,464;11,543;11
-Partage;Atendimento ao cliente ;3;8,417;16,464;11,543;11
-Partage;Atendimento ao cliente ;4;20;16,464;11,543;11
-Partage;Atendimento ao cliente ;5;19,95;16,464;11,543;11
-Partage;Atendimento ao cliente ;6;8,283;16,464;11,543;11
-Partage;Atendimento ao cliente ;7;13,067;16,464;11,543;11
-Partage;Atendimento ao cliente ;8;15,183;16,464;11,543;11
-Partage;Atendimento ao cliente ;9;42,567;16,464;11,543;11
-Partage;Atendimento ao cliente ;10;31,333;16,464;11,543;11
-Partage;Atendimento ao cliente ;11;10,5;16,464;11,543;11
+Partage;Atendimento ao cliente;1;6,8;16,464;11,543;11
+Partage;Atendimento ao cliente;2;5,0;16,464;11,543;11
+Partage;Atendimento ao cliente;3;8,417;16,464;11,543;11
+Partage;Atendimento ao cliente;4;20,0;16,464;11,543;11
+Partage;Atendimento ao cliente;5;19,95;16,464;11,543;11
+Partage;Atendimento ao cliente;6;8,283;16,464;11,543;11
+Partage;Atendimento ao cliente;7;13,067;16,464;11,543;11
+Partage;Atendimento ao cliente;8;15,183;16,464;11,543;11
+Partage;Atendimento ao cliente;9;42,567;16,464;11,543;11
+Partage;Atendimento ao cliente;10;31,333;16,464;11,543;11
+Partage;Atendimento ao cliente;11;10,5;16,464;11,543;11
 Itabaiana;Reposição de prateleira;1;8,267;6,25;1,992;3
 Itabaiana;Reposição de prateleira;2;4,283;6,25;1,992;3
 Itabaiana;Reposição de prateleira;3;6,2;6,25;1,992;3
-Itabaiana;Abertura e acompanhamento de chamado;1;20;20;0;1
-Itabaiana;Criação de conteúdo;1;40;40;0;1
-Itabaiana;Elaboração de calendário do ciclo e divulgação;1;150;150;0;1
-Itabaiana;Encontro de ciclo;1;30;30;0;1
-Itabaiana;Eventos para os revendedores;1;420;420;0;1
-Itabaiana;Limpeza da ER ;1;20;20;0;1
-Itabaiana;Limpeza dos banheiros ;1;20;20;0;1
-Itabaiana;Produção de flyer ;1;10;10;0;1
-Itabaiana;Fechamento de caixa;1;30;30;0;1
-Itabaiana;Digitalização de boletos ;1;3;1,731;0,763;6
-Itabaiana;Digitalização de boletos ;2;2,05;1,731;0,763;6
-Itabaiana;Digitalização de boletos ;3;0,8;1,731;0,763;6
-Itabaiana;Digitalização de boletos ;4;1,75;1,731;0,763;6
-Itabaiana;Digitalização de boletos ;5;1,617;1,731;0,763;6
-Itabaiana;Digitalização de boletos ;6;1,167;1,731;0,763;6
+Itabaiana;Abertura e acompanhamento de chamado;1;20,0;20,0;0,0;1
+Itabaiana;Criação de conteúdo;1;40,0;40,0;0,0;1
+Itabaiana;Elaboração de calendário do ciclo e divulgação;1;150,0;150,0;0,0;1
+Itabaiana;Encontro de ciclo;1;30,0;30,0;0,0;1
+Itabaiana;Eventos para os revendedores;1;420,0;420,0;0,0;1
+Itabaiana;Limpeza da ER;1;20,0;20,0;0,0;1
+Itabaiana;Limpeza dos banheiros;1;20,0;20,0;0,0;1
+Itabaiana;Produção de flyer;1;10,0;10,0;0,0;1
+Itabaiana;Fechamento de caixa;1;30,0;30,0;0,0;1
+Itabaiana;Digitalização de boletos;1;3,0;1,731;0,763;6
+Itabaiana;Digitalização de boletos;2;2,05;1,731;0,763;6
+Itabaiana;Digitalização de boletos;3;0,8;1,731;0,763;6
+Itabaiana;Digitalização de boletos;4;1,75;1,731;0,763;6
+Itabaiana;Digitalização de boletos;5;1,617;1,731;0,763;6
+Itabaiana;Digitalização de boletos;6;1,167;1,731;0,763;6
 Itabaiana;Faturamente de pedido (retirada e delivery);1;6,867;3,889;1,933;14
 Itabaiana;Faturamente de pedido (retirada e delivery);2;5,917;3,889;1,933;14
 Itabaiana;Faturamente de pedido (retirada e delivery);3;5,9;3,889;1,933;14
@@ -257,20 +257,20 @@ Itabaiana;Venda em caixa;7;53,283;17,475;14,639;10
 Itabaiana;Venda em caixa;8;24,033;17,475;14,639;10
 Itabaiana;Venda em caixa;9;7,3;17,475;14,639;10
 Itabaiana;Venda em caixa;10;14,75;17,475;14,639;10
-Itabaiana;Atendimento ao cliente ;1;16,967;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;2;3,833;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;3;1,05;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;4;12,667;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;5;12,217;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;6;8,167;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;7;3,917;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;8;1,7;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;9;5,583;6,827;5,458;10
-Itabaiana;Atendimento ao cliente ;10;2,167;6,827;5,458;10
-Itabaiana;Atendimento online;1;37;38,333;17,039;3
-Itabaiana;Atendimento online;2;22;38,333;17,039;3
-Itabaiana;Atendimento online;3;56;38,333;17,039;3
-Campina;Devolução;1;4,117;4,117;0;1
+Itabaiana;Atendimento ao cliente;1;16,967;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;2;3,833;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;3;1,05;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;4;12,667;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;5;12,217;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;6;8,167;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;7;3,917;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;8;1,7;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;9;5,583;6,827;5,458;10
+Itabaiana;Atendimento ao cliente;10;2,167;6,827;5,458;10
+Itabaiana;Atendimento online;1;37,0;38,333;17,039;3
+Itabaiana;Atendimento online;2;22,0;38,333;17,039;3
+Itabaiana;Atendimento online;3;56,0;38,333;17,039;3
+Campina;Devolução;1;4,117;4,117;0,0;1
 Campina;Reposição de prateleira;1;5,033;5,888;1,423;14
 Campina;Reposição de prateleira;2;5,033;5,888;1,423;14
 Campina;Reposição de prateleira;3;5,033;5,888;1,423;14
@@ -285,56 +285,56 @@ Campina;Reposição de prateleira;11;6,35;5,888;1,423;14
 Campina;Reposição de prateleira;12;4,967;5,888;1,423;14
 Campina;Reposição de prateleira;13;10,4;5,888;1,423;14
 Campina;Reposição de prateleira;14;6,333;5,888;1,423;14
-Campina;Abertura e acompanhamento de chamado;1;20;20;0;1
-Campina;Criação de conteúdo;1;120;120;0;1
-Campina;Elaboração de calendário do ciclo e divulgação;1;120;120;0;1
-Campina;Encontro de ciclo;1;330;330;0;1
-Campina;Eventos para os revendedores;1;360;360;0;1
-Campina;Produção de flyer ;1;20;20;0;1
-Campina;Mudança de planograma ;1;3;3;0;1
-Campina;Mudança de planograma ;2;3;3;0;40
-Campina;Mudança de planograma ;3;3;3;0;40
-Campina;Mudança de planograma ;4;3;3;0;40
-Campina;Mudança de planograma ;5;3;3;0;40
-Campina;Mudança de planograma ;6;3;3;0;40
-Campina;Mudança de planograma ;7;3;3;0;40
-Campina;Mudança de planograma ;8;3;3;0;40
-Campina;Mudança de planograma ;9;3;3;0;40
-Campina;Mudança de planograma ;10;3;3;0;40
-Campina;Mudança de planograma ;11;3;3;0;40
-Campina;Mudança de planograma ;12;3;3;0;40
-Campina;Mudança de planograma ;13;3;3;0;40
-Campina;Mudança de planograma ;14;3;3;0;40
-Campina;Mudança de planograma ;15;3;3;0;40
-Campina;Mudança de planograma ;16;3;3;0;40
-Campina;Mudança de planograma ;17;3;3;0;40
-Campina;Mudança de planograma ;18;3;3;0;40
-Campina;Mudança de planograma ;19;3;3;0;40
-Campina;Mudança de planograma ;20;3;3;0;40
-Campina;Mudança de planograma ;21;3;3;0;40
-Campina;Mudança de planograma ;22;3;3;0;40
-Campina;Mudança de planograma ;23;3;3;0;40
-Campina;Mudança de planograma ;24;3;3;0;40
-Campina;Mudança de planograma ;25;3;3;0;40
-Campina;Mudança de planograma ;26;3;3;0;40
-Campina;Mudança de planograma ;27;3;3;0;40
-Campina;Mudança de planograma ;28;3;3;0;40
-Campina;Mudança de planograma ;29;3;3;0;40
-Campina;Mudança de planograma ;30;3;3;0;40
-Campina;Mudança de planograma ;31;3;3;0;40
-Campina;Mudança de planograma ;32;3;3;0;40
-Campina;Mudança de planograma ;33;3;3;0;40
-Campina;Mudança de planograma ;34;3;3;0;40
-Campina;Mudança de planograma ;35;3;3;0;40
-Campina;Mudança de planograma ;36;3;3;0;40
-Campina;Mudança de planograma ;37;3;3;0;40
-Campina;Mudança de planograma ;38;3;3;0;40
-Campina;Mudança de planograma ;39;3;3;0;40
-Campina;Mudança de planograma ;40;3;3;0;40
-Campina;Fechamento de caixa;1;180;180;0;1
-Campina;Atualização de cadastro de revendedor ;1;36,15;36,15;0;1
-Campina;Cadastro de revendedor ;1;19;18,042;1,355;2
-Campina;Cadastro de revendedor ;2;17,083;18,042;1,355;2
+Campina;Abertura e acompanhamento de chamado;1;20,0;20,0;0,0;1
+Campina;Criação de conteúdo;1;120,0;120,0;0,0;1
+Campina;Elaboração de calendário do ciclo e divulgação;1;120,0;120,0;0,0;1
+Campina;Encontro de ciclo;1;330,0;330,0;0,0;1
+Campina;Eventos para os revendedores;1;360,0;360,0;0,0;1
+Campina;Produção de flyer;1;20,0;20,0;0,0;1
+Campina;Mudança de planograma;1;3,0;3,0;0,0;1
+Campina;Mudança de planograma;2;3,0;3,0;0,0;40
+Campina;Mudança de planograma;3;3,0;3,0;0,0;40
+Campina;Mudança de planograma;4;3,0;3,0;0,0;40
+Campina;Mudança de planograma;5;3,0;3,0;0,0;40
+Campina;Mudança de planograma;6;3,0;3,0;0,0;40
+Campina;Mudança de planograma;7;3,0;3,0;0,0;40
+Campina;Mudança de planograma;8;3,0;3,0;0,0;40
+Campina;Mudança de planograma;9;3,0;3,0;0,0;40
+Campina;Mudança de planograma;10;3,0;3,0;0,0;40
+Campina;Mudança de planograma;11;3,0;3,0;0,0;40
+Campina;Mudança de planograma;12;3,0;3,0;0,0;40
+Campina;Mudança de planograma;13;3,0;3,0;0,0;40
+Campina;Mudança de planograma;14;3,0;3,0;0,0;40
+Campina;Mudança de planograma;15;3,0;3,0;0,0;40
+Campina;Mudança de planograma;16;3,0;3,0;0,0;40
+Campina;Mudança de planograma;17;3,0;3,0;0,0;40
+Campina;Mudança de planograma;18;3,0;3,0;0,0;40
+Campina;Mudança de planograma;19;3,0;3,0;0,0;40
+Campina;Mudança de planograma;20;3,0;3,0;0,0;40
+Campina;Mudança de planograma;21;3,0;3,0;0,0;40
+Campina;Mudança de planograma;22;3,0;3,0;0,0;40
+Campina;Mudança de planograma;23;3,0;3,0;0,0;40
+Campina;Mudança de planograma;24;3,0;3,0;0,0;40
+Campina;Mudança de planograma;25;3,0;3,0;0,0;40
+Campina;Mudança de planograma;26;3,0;3,0;0,0;40
+Campina;Mudança de planograma;27;3,0;3,0;0,0;40
+Campina;Mudança de planograma;28;3,0;3,0;0,0;40
+Campina;Mudança de planograma;29;3,0;3,0;0,0;40
+Campina;Mudança de planograma;30;3,0;3,0;0,0;40
+Campina;Mudança de planograma;31;3,0;3,0;0,0;40
+Campina;Mudança de planograma;32;3,0;3,0;0,0;40
+Campina;Mudança de planograma;33;3,0;3,0;0,0;40
+Campina;Mudança de planograma;34;3,0;3,0;0,0;40
+Campina;Mudança de planograma;35;3,0;3,0;0,0;40
+Campina;Mudança de planograma;36;3,0;3,0;0,0;40
+Campina;Mudança de planograma;37;3,0;3,0;0,0;40
+Campina;Mudança de planograma;38;3,0;3,0;0,0;40
+Campina;Mudança de planograma;39;3,0;3,0;0,0;40
+Campina;Mudança de planograma;40;3,0;3,0;0,0;40
+Campina;Fechamento de caixa;1;180,0;180,0;0,0;1
+Campina;Atualização de cadastro de revendedor;1;36,15;36,15;0,0;1
+Campina;Cadastro de revendedor;1;19,0;18,042;1,355;2
+Campina;Cadastro de revendedor;2;17,083;18,042;1,355;2
 Campina;Faturamente de pedido (retirada e delivery);1;7,083;7,833;8,455;8
 Campina;Faturamente de pedido (retirada e delivery);2;5,367;7,833;8,455;8
 Campina;Faturamente de pedido (retirada e delivery);3;5,167;7,833;8,455;8
@@ -374,16 +374,16 @@ Campina;Venda em caixa;16;24,5;14,718;11,814;19
 Campina;Venda em caixa;17;10,167;14,718;11,814;19
 Campina;Venda em caixa;18;3,5;14,718;11,814;19
 Campina;Venda em caixa;19;6,167;14,718;11,814;19
-Campina;Atendimento ao cliente ;1;7,483;3,31;1,977;10
-Campina;Atendimento ao cliente ;2;4,567;3,31;1,977;10
-Campina;Atendimento ao cliente ;3;5,067;3,31;1,977;10
-Campina;Atendimento ao cliente ;4;2,667;3,31;1,977;10
-Campina;Atendimento ao cliente ;5;2,8;3,31;1,977;10
-Campina;Atendimento ao cliente ;6;2,083;3,31;1,977;10
-Campina;Atendimento ao cliente ;7;2,1;3,31;1,977;10
-Campina;Atendimento ao cliente ;8;0,667;3,31;1,977;10
-Campina;Atendimento ao cliente ;9;1,833;3,31;1,977;10
-Campina;Atendimento ao cliente ;10;3,833;3,31;1,977;10
+Campina;Atendimento ao cliente;1;7,483;3,31;1,977;10
+Campina;Atendimento ao cliente;2;4,567;3,31;1,977;10
+Campina;Atendimento ao cliente;3;5,067;3,31;1,977;10
+Campina;Atendimento ao cliente;4;2,667;3,31;1,977;10
+Campina;Atendimento ao cliente;5;2,8;3,31;1,977;10
+Campina;Atendimento ao cliente;6;2,083;3,31;1,977;10
+Campina;Atendimento ao cliente;7;2,1;3,31;1,977;10
+Campina;Atendimento ao cliente;8;0,667;3,31;1,977;10
+Campina;Atendimento ao cliente;9;1,833;3,31;1,977;10
+Campina;Atendimento ao cliente;10;3,833;3,31;1,977;10
 Goianinha;Reposição de prateleira;1;4,883;3,506;1,722;9
 Goianinha;Reposição de prateleira;2;4,183;3,506;1,722;9
 Goianinha;Reposição de prateleira;3;6,167;3,506;1,722;9
@@ -393,90 +393,90 @@ Goianinha;Reposição de prateleira;6;1,217;3,506;1,722;9
 Goianinha;Reposição de prateleira;7;2,133;3,506;1,722;9
 Goianinha;Reposição de prateleira;8;2,6;3,506;1,722;9
 Goianinha;Reposição de prateleira;9;4,15;3,506;1,722;9
-Goianinha;Abertura e acompanhamento de chamado;1;10;10;0;1
-Goianinha;Criação de conteúdo;1;20;20;0;1
-Goianinha;Encontro de ciclo;1;210;210;0;1
-Goianinha;Eventos para os revendedores;1;480;480;0;1
-Goianinha;Limpeza da ER ;1;15;15;0;1
-Goianinha;Limpeza das salas e Copa;1;60;60;0;1
-Goianinha;Limpeza dos banheiros ;1;20;20;0;1
-Goianinha;Produção de flyer ;1;10;10;0;1
-Goianinha;Mudança de planograma ;1;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;2;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;3;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;4;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;5;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;6;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;7;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;8;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;9;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;10;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;11;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;12;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;13;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;14;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;15;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;16;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;17;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;18;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;19;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;20;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;21;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;22;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;23;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;24;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;25;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;26;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;27;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;28;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;29;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;30;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;31;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;32;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;33;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;34;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;35;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;36;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;37;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;38;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;39;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;40;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;41;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;42;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;43;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;44;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;45;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;46;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;47;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;48;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;49;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;50;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;51;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;52;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;53;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;54;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;55;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;56;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;57;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;58;8,13559322;8,13559322;0;59
-Goianinha;Mudança de planograma ;59;8,13559322;8,13559322;0;59
-Goianinha;Separação de mercadoria (on-line e retirada);1;8,15;8,15;0;1
+Goianinha;Abertura e acompanhamento de chamado;1;10,0;10,0;0,0;1
+Goianinha;Criação de conteúdo;1;20,0;20,0;0,0;1
+Goianinha;Encontro de ciclo;1;210,0;210,0;0,0;1
+Goianinha;Eventos para os revendedores;1;480,0;480,0;0,0;1
+Goianinha;Limpeza da ER;1;15,0;15,0;0,0;1
+Goianinha;Limpeza das salas e Copa;1;60,0;60,0;0,0;1
+Goianinha;Limpeza dos banheiros;1;20,0;20,0;0,0;1
+Goianinha;Produção de flyer;1;10,0;10,0;0,0;1
+Goianinha;Mudança de planograma;1;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;2;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;3;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;4;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;5;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;6;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;7;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;8;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;9;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;10;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;11;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;12;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;13;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;14;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;15;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;16;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;17;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;18;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;19;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;20;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;21;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;22;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;23;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;24;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;25;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;26;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;27;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;28;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;29;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;30;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;31;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;32;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;33;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;34;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;35;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;36;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;37;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;38;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;39;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;40;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;41;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;42;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;43;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;44;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;45;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;46;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;47;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;48;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;49;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;50;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;51;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;52;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;53;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;54;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;55;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;56;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;57;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;58;8,13559322;8,13559322;0,0;59
+Goianinha;Mudança de planograma;59;8,13559322;8,13559322;0,0;59
+Goianinha;Separação de mercadoria (on-line e retirada);1;8,15;8,15;0,0;1
 Goianinha;Venda em caixa;1;25,733;14,588;9,964;12
 Goianinha;Venda em caixa;2;6,883;14,588;9,964;12
 Goianinha;Venda em caixa;3;6,467;14,588;9,964;12
 Goianinha;Venda em caixa;4;9,6;14,588;9,964;12
 Goianinha;Venda em caixa;5;9,5;14,588;9,964;12
-Goianinha;Venda em caixa;6;10;14,588;9,964;12
+Goianinha;Venda em caixa;6;10,0;14,588;9,964;12
 Goianinha;Venda em caixa;7;18,55;14,588;9,964;12
 Goianinha;Venda em caixa;8;10,283;14,588;9,964;12
 Goianinha;Venda em caixa;9;9,533;14,588;9,964;12
 Goianinha;Venda em caixa;10;19,9;14,588;9,964;12
 Goianinha;Venda em caixa;11;8,583;14,588;9,964;12
 Goianinha;Venda em caixa;12;40,017;14,588;9,964;12
-Goianinha;Atendimento ao cliente ;1;8,2;6,558;3,373;4
-Goianinha;Atendimento ao cliente ;2;8,2;6,558;3,373;4
-Goianinha;Atendimento ao cliente ;3;8,333;6,558;3,373;4
-Goianinha;Atendimento ao cliente ;4;1,5;6,558;3,373;4
+Goianinha;Atendimento ao cliente;1;8,2;6,558;3,373;4
+Goianinha;Atendimento ao cliente;2;8,2;6,558;3,373;4
+Goianinha;Atendimento ao cliente;3;8,333;6,558;3,373;4
+Goianinha;Atendimento ao cliente;4;1,5;6,558;3,373;4
 Mossoró;Devolução;1;4,267;4,058;1,462;4
 Mossoró;Devolução;2;4,267;4,058;1,462;4
 Mossoró;Devolução;3;5,617;4,058;1,462;4
@@ -489,17 +489,17 @@ Mossoró;Reposição de prateleira;5;10,45;4,229;2,798;8
 Mossoró;Reposição de prateleira;6;4,25;4,229;2,798;8
 Mossoró;Reposição de prateleira;7;2,267;4,229;2,798;8
 Mossoró;Reposição de prateleira;8;1,8;4,229;2,798;8
-Mossoró;Mudança de planograma ;1;12,067;33,623;19,686;5
-Mossoró;Mudança de planograma ;2;12,05;33,623;19,686;5
-Mossoró;Mudança de planograma ;3;48;33,623;19,686;5
-Mossoró;Mudança de planograma ;4;48;33,623;19,686;5
-Mossoró;Mudança de planograma ;5;48;33,623;19,686;5
-Mossoró;Abertura e acompanhamento de chamado;1;20;20;0;1
-Mossoró;Criação de conteúdo;1;45;45;0;1
-Mossoró;Elaboração de calendário do ciclo e divulgação;1;210;210;0;1
-Mossoró;Encontro de ciclo;1;600;600;0;1
-Mossoró;Fechamento de caixa;1;60;60;0;1
-Mossoró;Cadastro de revendedor ;1;9,033;9,033;0;1
+Mossoró;Mudança de planograma;1;12,067;33,623;19,686;5
+Mossoró;Mudança de planograma;2;12,05;33,623;19,686;5
+Mossoró;Mudança de planograma;3;48,0;33,623;19,686;5
+Mossoró;Mudança de planograma;4;48,0;33,623;19,686;5
+Mossoró;Mudança de planograma;5;48,0;33,623;19,686;5
+Mossoró;Abertura e acompanhamento de chamado;1;20,0;20,0;0,0;1
+Mossoró;Criação de conteúdo;1;45,0;45,0;0,0;1
+Mossoró;Elaboração de calendário do ciclo e divulgação;1;210,0;210,0;0,0;1
+Mossoró;Encontro de ciclo;1;600,0;600,0;0,0;1
+Mossoró;Fechamento de caixa;1;60,0;60,0;0,0;1
+Mossoró;Cadastro de revendedor;1;9,033;9,033;0,0;1
 Mossoró;Faturamente de pedido (retirada e delivery);1;7,483;6,245;2,666;7
 Mossoró;Faturamente de pedido (retirada e delivery);2;4,15;6,245;2,666;7
 Mossoró;Faturamente de pedido (retirada e delivery);3;3,35;6,245;2,666;7
@@ -536,81 +536,81 @@ Mossoró;Venda em caixa;11;17,167;22,114;7,676;14
 Mossoró;Venda em caixa;12;14,933;22,114;7,676;14
 Mossoró;Venda em caixa;13;13,567;22,114;7,676;14
 Mossoró;Venda em caixa;14;9,683;22,114;7,676;14
-Mossoró;Atendimento ao cliente ;1;2,6;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;2;2,117;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;3;1,033;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;4;1,85;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;5;0,917;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;6;0,667;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;7;1,117;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;8;2,567;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;9;5,55;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;10;1,367;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;11;1,8;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;12;2,367;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;13;0,833;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;14;2,7;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;15;1,683;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;16;1,8;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;17;3,217;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;18;7,417;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;19;4,567;2,782;2,311;20
-Mossoró;Atendimento ao cliente ;20;9,467;2,782;2,311;20
-Mossoró;Ativações on-line (Cessados);1;22;22;0;1
-Paracuru;Devolução;1;15,217;15,217;0;1
-Paracuru;Criação de conteúdo;1;60;60;0;1
-Paracuru;Eventos para os revendedores;1;240;240;0;1
-Paracuru;Limpeza da ER ;1;15;15;0;1
-Paracuru;Limpeza dos banheiros ;1;20;20;0;1
-Paracuru;Mudança de planograma ;1;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;2;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;3;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;4;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;5;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;6;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;7;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;8;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;9;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;10;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;11;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;12;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;13;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;14;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;15;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;16;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;17;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;18;12,632;12,632;0;19
-Paracuru;Mudança de planograma ;19;12,632;12,632;0;19
+Mossoró;Atendimento ao cliente;1;2,6;2,782;2,311;20
+Mossoró;Atendimento ao cliente;2;2,117;2,782;2,311;20
+Mossoró;Atendimento ao cliente;3;1,033;2,782;2,311;20
+Mossoró;Atendimento ao cliente;4;1,85;2,782;2,311;20
+Mossoró;Atendimento ao cliente;5;0,917;2,782;2,311;20
+Mossoró;Atendimento ao cliente;6;0,667;2,782;2,311;20
+Mossoró;Atendimento ao cliente;7;1,117;2,782;2,311;20
+Mossoró;Atendimento ao cliente;8;2,567;2,782;2,311;20
+Mossoró;Atendimento ao cliente;9;5,55;2,782;2,311;20
+Mossoró;Atendimento ao cliente;10;1,367;2,782;2,311;20
+Mossoró;Atendimento ao cliente;11;1,8;2,782;2,311;20
+Mossoró;Atendimento ao cliente;12;2,367;2,782;2,311;20
+Mossoró;Atendimento ao cliente;13;0,833;2,782;2,311;20
+Mossoró;Atendimento ao cliente;14;2,7;2,782;2,311;20
+Mossoró;Atendimento ao cliente;15;1,683;2,782;2,311;20
+Mossoró;Atendimento ao cliente;16;1,8;2,782;2,311;20
+Mossoró;Atendimento ao cliente;17;3,217;2,782;2,311;20
+Mossoró;Atendimento ao cliente;18;7,417;2,782;2,311;20
+Mossoró;Atendimento ao cliente;19;4,567;2,782;2,311;20
+Mossoró;Atendimento ao cliente;20;9,467;2,782;2,311;20
+Mossoró;Ativações on-line (Cessados);1;22,0;22,0;0,0;1
+Paracuru;Devolução;1;15,217;15,217;0,0;1
+Paracuru;Criação de conteúdo;1;60,0;60,0;0,0;1
+Paracuru;Eventos para os revendedores;1;240,0;240,0;0,0;1
+Paracuru;Limpeza da ER;1;15,0;15,0;0,0;1
+Paracuru;Limpeza dos banheiros;1;20,0;20,0;0,0;1
+Paracuru;Mudança de planograma;1;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;2;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;3;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;4;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;5;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;6;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;7;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;8;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;9;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;10;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;11;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;12;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;13;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;14;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;15;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;16;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;17;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;18;12,632;12,632;0,0;19
+Paracuru;Mudança de planograma;19;12,632;12,632;0,0;19
 Paracuru;Separação de mercadoria (on-line e retirada);1;5,933;5,906;0,559;3
 Paracuru;Separação de mercadoria (on-line e retirada);2;6,45;5,906;0,559;3
 Paracuru;Separação de mercadoria (on-line e retirada);3;5,333;5,906;0,559;3
-Paracuru;Venda em caixa;1;15,567;15,567;0;1
-Paracuru;Atendimento ao cliente ;1;1,95;2,875;1,308;2
-Paracuru;Atendimento ao cliente ;2;3,8;2,875;1,308;2
-Paraipaba;Criação de conteúdo;1;30;30;0;1
-Paraipaba;Encontro de ciclo;1;180;180;0;1
-Paraipaba;Limpeza da ER ;1;20;20;0;1
-Paraipaba;Limpeza dos banheiros ;1;25;25;0;1
-Paraipaba;Faturamente de pedido (retirada e delivery);1;8,633;8,633;0;1
+Paracuru;Venda em caixa;1;15,567;15,567;0,0;1
+Paracuru;Atendimento ao cliente;1;1,95;2,875;1,308;2
+Paracuru;Atendimento ao cliente;2;3,8;2,875;1,308;2
+Paraipaba;Criação de conteúdo;1;30,0;30,0;0,0;1
+Paraipaba;Encontro de ciclo;1;180,0;180,0;0,0;1
+Paraipaba;Limpeza da ER;1;20,0;20,0;0,0;1
+Paraipaba;Limpeza dos banheiros;1;25,0;25,0;0,0;1
+Paraipaba;Faturamente de pedido (retirada e delivery);1;8,633;8,633;0,0;1
 Paraipaba;Venda em caixa;1;6,367;7,858;2,11;2
 Paraipaba;Venda em caixa;2;9,35;7,858;2,11;2
-Paraipaba;Atendimento ao cliente ;1;19,2;13,011;6,779;3
-Paraipaba;Atendimento ao cliente ;2;14,067;13,011;6,779;3
-Paraipaba;Atendimento ao cliente ;3;5,767;13,011;6,779;3
-Trairi;Limpeza da ER ;1;10;10;0;1
+Paraipaba;Atendimento ao cliente;1;19,2;13,011;6,779;3
+Paraipaba;Atendimento ao cliente;2;14,067;13,011;6,779;3
+Paraipaba;Atendimento ao cliente;3;5,767;13,011;6,779;3
+Trairi;Limpeza da ER;1;10,0;10,0;0,0;1
 Trairi;Venda em caixa;1;12,65;8,642;5,669;2
 Trairi;Venda em caixa;2;4,633;8,642;5,669;2
-Trairi;Atendimento ao cliente ;1;28,35;12,823;10,054;5
-Trairi;Atendimento ao cliente ;2;15,683;12,823;10,054;5
-Trairi;Atendimento ao cliente ;3;10,317;12,823;10,054;5
-Trairi;Atendimento ao cliente ;4;8,25;12,823;10,054;5
-Trairi;Atendimento ao cliente ;5;1,517;12,823;10,054;5
-Pentecoste;Reposição de prateleira;1;1,4;1,4;0;1
+Trairi;Atendimento ao cliente;1;28,35;12,823;10,054;5
+Trairi;Atendimento ao cliente;2;15,683;12,823;10,054;5
+Trairi;Atendimento ao cliente;3;10,317;12,823;10,054;5
+Trairi;Atendimento ao cliente;4;8,25;12,823;10,054;5
+Trairi;Atendimento ao cliente;5;1,517;12,823;10,054;5
+Pentecoste;Reposição de prateleira;1;1,4;1,4;0,0;1
 Pentecoste;Faturamente de pedido (retirada e delivery);1;4,383;3,989;0,612;3
 Pentecoste;Faturamente de pedido (retirada e delivery);2;4,3;3,989;0,612;3
 Pentecoste;Faturamente de pedido (retirada e delivery);3;3,283;3,989;0,612;3
 Pentecoste;Venda em caixa;1;8,417;6,967;2,051;2
 Pentecoste;Venda em caixa;2;5,517;6,967;2,051;2
-Pentecoste;Atendimento ao cliente ;1;30,3;12,622;15,31;3
-Pentecoste;Atendimento ao cliente ;2;3,883;12,622;15,31;3
-Pentecoste;Atendimento ao cliente ;3;3,683;12,622;15,31;3
+Pentecoste;Atendimento ao cliente;1;30,3;12,622;15,31;3
+Pentecoste;Atendimento ao cliente;2;3,883;12,622;15,31;3
+Pentecoste;Atendimento ao cliente;3;3,683;12,622;15,31;3

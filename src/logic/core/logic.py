@@ -2409,12 +2409,66 @@ def _parse_hour_value(value: object) -> Optional[int]:
     return None
 
 
+def _normalize_text_token(value: object) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    norm = unicodedata.normalize("NFKD", text)
+    norm = "".join(ch for ch in norm if not unicodedata.combining(ch))
+    return norm.casefold()
+
+
+def _is_total_like_token(value: object) -> bool:
+    token = _normalize_text_token(value)
+    if not token:
+        return False
+    if token in {"total", "total geral", "geral", "0"}:
+        return True
+    return token.startswith("total ")
+
+
+def _parse_ptbr_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype="float64")
+    numeric = pd.to_numeric(series, errors="coerce")
+    mask_nan = numeric.isna()
+    if mask_nan.any():
+        fallback = series.loc[mask_nan].apply(lambda v: safe_float(v, float("nan")))
+        numeric.loc[mask_nan] = fallback
+    return numeric.astype(float)
+
+
+def _drop_total_rows_for_upload(df: pd.DataFrame, nome: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    keep = pd.Series([True] * len(out), index=out.index)
+    if "Loja" in out.columns:
+        keep &= ~out["Loja"].apply(_is_total_like_token)
+    if nome == "fIndicadores":
+        for col in ("Estado", "Praça", "Praca"):
+            if col in out.columns:
+                keep &= ~out[col].apply(_is_total_like_token)
+    if nome == "fFaturamento2":
+        for col in out.columns:
+            if _normalize_col_name(col) == "praca":
+                keep &= ~out[col].apply(_is_total_like_token)
+    return out.loc[keep].reset_index(drop=True)
+
+
 def _derive_faturamento_orders(faturamento_df: pd.DataFrame) -> pd.DataFrame:
     if faturamento_df is None or faturamento_df.empty or "Loja" not in faturamento_df.columns:
         return pd.DataFrame()
     df = faturamento_df.copy()
     df["Loja"] = df["Loja"].astype(str).str.strip()
     df = df[df["Loja"] != ""]
+    df = df[~df["Loja"].apply(_is_total_like_token)]
+    for col in df.columns:
+        if _normalize_col_name(col) == "praca":
+            df = df[~df[col].apply(_is_total_like_token)]
+            break
     if df.empty:
         return pd.DataFrame()
     pedidos_count = None
@@ -2428,19 +2482,21 @@ def _derive_faturamento_orders(faturamento_df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["_cod"] = np.arange(len(df))
         if "Boletos" in df.columns:
-            pedidos_count = pd.to_numeric(df["Boletos"], errors="coerce")
+            pedidos_count = _parse_ptbr_numeric_series(df["Boletos"])
         elif "Pedidos" in df.columns:
-            pedidos_count = pd.to_numeric(df["Pedidos"], errors="coerce")
+            pedidos_count = _parse_ptbr_numeric_series(df["Pedidos"])
         else:
             pedidos_count = pd.Series(1.0, index=df.index, dtype="float64")
     df["PedidosCount"] = pedidos_count.fillna(0.0)
     agg_map: Dict[str, str] = {}
     if "Faturamento" in df.columns:
+        df["Faturamento"] = _parse_ptbr_numeric_series(df["Faturamento"])
         agg_map["Faturamento"] = "sum"
     elif "FaturamentoBruto" in df.columns:
-        df["Faturamento"] = pd.to_numeric(df["FaturamentoBruto"], errors="coerce")
+        df["Faturamento"] = _parse_ptbr_numeric_series(df["FaturamentoBruto"])
         agg_map["Faturamento"] = "sum"
     if "Itens" in df.columns:
+        df["Itens"] = _parse_ptbr_numeric_series(df["Itens"])
         agg_map["Itens"] = "sum"
     if "Retirada" in df.columns:
         agg_map["Retirada"] = "max"
@@ -2497,12 +2553,7 @@ def derive_indicadores_from_faturamento(
         res["ItensTotal"] = orders.groupby("Loja")["Itens"].sum()
     else:
         res["ItensTotal"] = 0.0
-    if "Retirada" in orders.columns:
-        retirada_series = orders["Retirada"].astype("boolean").fillna(False)
-        res["RetiradaTotal"] = retirada_series.groupby(orders["Loja"]).sum().astype(float)
-    else:
-        res["RetiradaTotal"] = 0.0
-    dias_series = pd.Series(0.0, index=res.index, dtype="float64")
+    dias_series = pd.Series(np.nan, index=res.index, dtype="float64")
     if "DataPedido" in orders.columns:
         dias = pd.to_datetime(orders["DataPedido"], errors="coerce").dt.date
         dias_df = pd.DataFrame({"Loja": orders["Loja"], "_data": dias})
@@ -2510,7 +2561,26 @@ def derive_indicadores_from_faturamento(
         if not dias_df.empty:
             dias_count = dias_df.groupby("Loja")["_data"].nunique().astype(float)
             dias_series = dias_count
-    horas_series = pd.Series(0.0, index=res.index, dtype="float64")
+    # Horas operacionais por loja (prioriza dEstrutura da própria loja; fallback para média global)
+    horas_dia_padrao = float(calcular_media_horas_operacionais(estrutura_df, default_horas_dia))
+    horas_dia_padrao = max(1.0, horas_dia_padrao)
+    horas_loja = pd.Series(horas_dia_padrao, index=res.index, dtype="float64")
+    if estrutura_df is not None and not estrutura_df.empty and "Loja" in estrutura_df.columns:
+        estrutura_norm = _ensure_loja_key(estrutura_df.copy())
+        if "HorasOperacionais" in estrutura_norm.columns:
+            horas_raw = pd.to_numeric(estrutura_norm["HorasOperacionais"], errors="coerce")
+            horas_raw = horas_raw.where(horas_raw > 0, np.nan)
+            horas_map = pd.DataFrame(
+                {"Loja_norm": estrutura_norm.get("Loja_norm"), "_horas": horas_raw}
+            ).dropna(subset=["Loja_norm"])
+            if not horas_map.empty:
+                horas_map = horas_map.groupby("Loja_norm", as_index=False)["_horas"].mean()
+                res_norm = _ensure_loja_key(res.reset_index()[["Loja"]])
+                res_norm = res_norm.merge(horas_map, on="Loja_norm", how="left")
+                horas_loja = pd.to_numeric(res_norm["_horas"], errors="coerce")
+                horas_loja = horas_loja.where(horas_loja > 0, horas_dia_padrao)
+                horas_loja.index = res.index
+    horas_series = pd.Series(np.nan, index=res.index, dtype="float64")
     if "HoraPedido" in orders.columns:
         horas = orders["HoraPedido"].apply(_parse_hour_value)
         horas_df = pd.DataFrame({"Loja": orders["Loja"], "_hora": horas})
@@ -2528,27 +2598,25 @@ def derive_indicadores_from_faturamento(
             horas_df = horas_df.dropna(subset=["_hora"])
             if not horas_df.empty:
                 horas_series = horas_df.groupby("Loja")["_hora"].nunique().astype(float)
-    horas_dia_padrao = float(calcular_media_horas_operacionais(estrutura_df, default_horas_dia))
-    horas_dia_padrao = max(1.0, horas_dia_padrao)
-    dias_total = dias_series.reindex(res.index).fillna(0.0)
-    dias_total = dias_total.where(dias_total > 0, float(365))
-    dias_total = dias_total.where(dias_total >= 40.0, float(365))
-    horas_total = horas_series.reindex(res.index).fillna(0.0)
-    horas_fallback = dias_total * horas_dia_padrao
+    dias_total = dias_series.reindex(res.index)
+    dias_total = dias_total.where(dias_total > 0, np.nan)
+    horas_total = horas_series.reindex(res.index)
+    horas_fallback = dias_total * horas_loja
     horas_total = horas_total.where(horas_total > 0, horas_fallback)
     pedidos = res["Pedidos"].fillna(0.0).astype(float)
     receita = res["ReceitaTotalMes"].fillna(0.0).astype(float)
     itens_total = res["ItensTotal"].fillna(0.0).astype(float)
-    retirada_total = res["RetiradaTotal"].fillna(0.0).astype(float)
-    res["Pedidos/Dia"] = (pedidos / dias_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    res["Pedidos/Hora"] = (pedidos / horas_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    ticket_medio = receita_total / pedidos.replace(0, np.nan)
+    pedidos_dia = (pedidos / dias_total).replace([np.inf, -np.inf], np.nan)
+    # Regra de negócio: pedidos/hora = pedidos/dia dividido por horas operacionais da loja
+    pedidos_hora = (pedidos_dia / horas_loja.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    res["Pedidos/Dia"] = pedidos_dia.fillna(0.0)
+    res["Pedidos/Hora"] = pedidos_hora.fillna(0.0)
     res["Faturamento/Hora"] = (receita / horas_total).replace([np.inf, -np.inf], 0.0).fillna(0.0)
     res["Itens/Pedido"] = (itens_total / pedidos.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    res["%Retirada"] = (
-        (retirada_total / pedidos.replace(0, np.nan)) * 100.0
-    ).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["ReaisPorAtivo"] = ticket_medio.replace([np.inf, -np.inf], np.nan)
     res = res.reset_index()
-    res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal", "RetiradaTotal"] if c in res.columns])
+    res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal"] if c in res.columns])
     return res
 
 
@@ -2579,7 +2647,7 @@ def merge_indicadores_from_faturamento(
         "Pedidos/Hora",
         "Faturamento/Hora",
         "Itens/Pedido",
-        "%Retirada",
+        "ReaisPorAtivo",
     ]
     for col in cols_to_update:
         derived_col = f"{col}_ffat"
@@ -2592,15 +2660,96 @@ def merge_indicadores_from_faturamento(
         merged = merged.drop(columns=[derived_col])
     if "Loja_norm" in merged.columns:
         merged = merged.drop(columns=["Loja_norm"])
-    if "BaseAtiva" in merged.columns and "ReceitaTotalMes" in merged.columns:
+    if "TaxaReinicios" in merged.columns:
+        reinicios = pd.to_numeric(merged.get("Reinicios"), errors="coerce")
+        base_ativa = pd.to_numeric(merged.get("BaseAtiva"), errors="coerce")
+        taxa_reinicios = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+        merged["TaxaReinicios"] = taxa_reinicios.combine_first(pd.to_numeric(merged["TaxaReinicios"], errors="coerce"))
+    elif {"Reinicios", "BaseAtiva"}.issubset(merged.columns):
+        reinicios = pd.to_numeric(merged["Reinicios"], errors="coerce")
         base_ativa = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
-        receita = pd.to_numeric(merged["ReceitaTotalMes"], errors="coerce")
-        reais_por_ativo = (receita / base_ativa.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-        if "ReaisPorAtivo" in merged.columns:
-            merged["ReaisPorAtivo"] = merged["ReaisPorAtivo"].combine_first(reais_por_ativo)
-        else:
-            merged["ReaisPorAtivo"] = reais_por_ativo
+        merged["TaxaReinicios"] = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    merged = _recompute_total_row_findicadores(merged)
     return merged
+
+
+def _recompute_total_row_findicadores(df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Recalcula a linha TOTAL de fIndicadores com somas e médias apropriadas."""
+    if df is None or df.empty:
+        return create_empty_from_schema(get_schema_fIndicadores())
+    work = df.copy()
+    total_mask = pd.Series([False] * len(work), index=work.index)
+    for col in ("Estado", "Praça", "Praca"):
+        if col in work.columns:
+            total_mask = total_mask | (work[col].astype(str).str.strip().str.upper() == "TOTAL")
+    lojas = work.loc[~total_mask].copy()
+    if lojas.empty:
+        return work
+    sum_cols = {
+        "BaseTotal",
+        "BaseAtiva",
+        "ReceitaTotalMes",
+        "A0",
+        "A1aA3",
+        "A0aA3",
+        "I4aI6",
+        "Inicios",
+        "Reinicios",
+        "Recuperados",
+    }
+    mean_cols = {
+        "%daBaseTotal",
+        "%doFatTotal",
+        "%Ativos",
+        "TaxaReativacao",
+        "TaxaReinicios",
+        "%Retirada",
+        "Faturamento/Hora",
+        "Pedidos/Hora",
+        "Pedidos/Dia",
+        "Itens/Pedido",
+        "%IAF25",
+        "ReaisPorAtivo",
+        "AtividadeER",
+        "Churn",
+    }
+    total_row: Dict[str, object] = {}
+    for col in work.columns:
+        if col in ("Estado", "Praça", "Praca"):
+            total_row[col] = "TOTAL"
+            continue
+        if col == "Loja":
+            total_row[col] = "TOTAL"
+            continue
+        if col in ("BCPS", "SAP"):
+            total_row[col] = ""
+            continue
+        numeric = pd.to_numeric(lojas[col], errors="coerce") if col in lojas.columns else pd.Series(dtype="float64")
+        if col in sum_cols:
+            val = numeric.sum(min_count=1)
+            total_row[col] = float(val) if pd.notna(val) else np.nan
+        elif col in mean_cols:
+            val = numeric.mean()
+            total_row[col] = float(val) if pd.notna(val) else np.nan
+        else:
+            total_row[col] = np.nan
+    # Regras explícitas de consistência para colunas derivadas principais
+    base_total = safe_float(total_row.get("BaseTotal"), 0.0)
+    base_ativa = safe_float(total_row.get("BaseAtiva"), 0.0)
+    receita_total = safe_float(total_row.get("ReceitaTotalMes"), 0.0)
+    reinicios_total = safe_float(total_row.get("Reinicios"), 0.0)
+    total_row["%Ativos"] = (base_ativa / base_total * 100.0) if base_total > 0 else np.nan
+    total_row["TaxaReinicios"] = (reinicios_total / base_ativa * 100.0) if base_ativa > 0 else np.nan
+    total_row["%daBaseTotal"] = 100.0 if base_total > 0 else np.nan
+    total_row["%doFatTotal"] = 100.0 if receita_total > 0 else np.nan
+    if "Boletos" in lojas.columns:
+        boletos_total = pd.to_numeric(lojas["Boletos"], errors="coerce").sum(min_count=1)
+        if pd.notna(boletos_total) and boletos_total > 0:
+            total_row["ReaisPorAtivo"] = receita_total / float(boletos_total)
+    work = work.loc[~total_mask]
+    total_df = pd.DataFrame([total_row], columns=work.columns)
+    work = pd.concat([work, total_df], ignore_index=True)
+    return work
 # =============================================================================
 # Uploads e sessões do app
 # =============================================================================
@@ -2639,27 +2788,269 @@ def append_and_dedup(base: pd.DataFrame, new: pd.DataFrame, subset_cols: List[st
     else:
         combined = combined.drop_duplicates(keep="last")
     return combined.reset_index(drop=True)
+
+
+CRITICAL_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
+    "dAmostras": ["Loja", "Processo", "Amostra", "Minutos"],
+    "dEstrutura": ["Loja", "Area Total", "Caixas", "Esp Conv", "Copa", "Escritorio", "Shopping", "HorasOperacionais"],
+    "dPessoas": ["Loja", "QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "%disp"],
+    "fFaturamento2": ["Loja", "Data", "DataPedido", "Faturamento", "Itens", "Boletos", "CodPedido"],
+    "fIndicadores": [
+        "BCPS", "SAP", "Estado", "Praça", "Loja", "BaseTotal", "BaseAtiva", "Churn", "ReceitaTotalMes",
+        "ReaisPorAtivo", "AtividadeER", "A0", "A1aA3", "I4aI6", "Inicios", "Reinicios", "Recuperados",
+        "%daBaseTotal", "%doFatTotal", "%Ativos", "A0aA3", "TaxaReativacao", "TaxaReinicios", "%Retirada",
+        "Faturamento/Hora", "Pedidos/Hora", "Pedidos/Dia", "Itens/Pedido", "%IAF25",
+    ],
+}
+
+
+DERIVED_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
+    "dAmostras": ["Tempo Médio", "Desvio", "Número de Amostras"],
+    "dEstrutura": ["DiasOperacionaisMes"],
+    "dPessoas": ["TotalMapeado", "SalarioMapeado", "%absent"],
+    "fFaturamento2": [],
+    "fIndicadores": [
+        "A0aA3", "%Ativos", "TaxaInicios", "TaxaReativacao", "TaxaReinicios",
+        "ReceitaTotalMes", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora", "Itens/Pedido",
+        "ReaisPorAtivo", "%daBaseTotal", "%doFatTotal",
+    ],
+}
+
+
+def get_upload_column_rules(nome: str) -> Tuple[List[str], List[str]]:
+    return CRITICAL_COLUMNS_BY_DATASET.get(nome, []), DERIVED_COLUMNS_BY_DATASET.get(nome, [])
+
+
+def _normalize_cols_for_dataset(df: pd.DataFrame, nome: str) -> pd.DataFrame:
+    if df is None:
+        return pd.DataFrame()
+    out = df.copy()
+    aliases = ALIASES_BY_SCHEMA.get(nome, {})
+    if aliases:
+        out = out.rename(columns={col: aliases.get(col, col) for col in out.columns})
+    if nome == "dPessoas":
+        out = _standardize_cols(out)
+    return out
+
+
+def _upsert_critical_columns(
+    base: pd.DataFrame,
+    new: pd.DataFrame,
+    key_cols: List[str],
+    critical_cols: List[str],
+) -> pd.DataFrame:
+    if base is None or base.empty:
+        return new.reset_index(drop=True)
+    if new is None or new.empty:
+        return base.reset_index(drop=True)
+    working = base.copy()
+    keys = [c for c in key_cols if c in new.columns]
+    if not keys:
+        return append_and_dedup(working, new, key_cols)
+    all_needed_cols = list(dict.fromkeys(keys + critical_cols))
+    for col in all_needed_cols:
+        if col not in working.columns:
+            working[col] = pd.NA
+    new_local = new.copy()
+    for col in all_needed_cols:
+        if col not in new.columns:
+            new_local[col] = pd.NA
+    working = _ensure_loja_key(working) if "Loja" in working.columns else working
+    new_local = _ensure_loja_key(new_local) if "Loja" in new_local.columns else new_local
+    if "Loja_norm" in working.columns and "Loja" in keys:
+        keys = [("Loja_norm" if k == "Loja" else k) for k in keys]
+    key_critical = [c for c in critical_cols if c in working.columns and c in new_local.columns and c not in keys]
+    base_non_critical = [c for c in working.columns if c not in key_critical]
+    merged_base = working[base_non_critical]
+    cols_new = list(dict.fromkeys(keys + key_critical))
+    merged_new = new_local[cols_new].copy()
+    out = merged_base.merge(merged_new, on=keys, how="outer")
+    out = out.drop_duplicates(subset=keys, keep="last")
+    out = out[working.columns]
+    if "Loja_norm" in out.columns:
+        out = out.drop(columns=["Loja_norm"])
+    return out
+
+
+def _coerce_percent_0_1(values: pd.Series) -> pd.Series:
+    val = pd.to_numeric(values, errors="coerce")
+    mask = val > 1.0
+    if mask.any():
+        val.loc[mask] = val.loc[mask] / 100.0
+    return val
+
+
+def _load_custo_por_cargo_map() -> Dict[str, float]:
+    path = Path("data") / "CustoPorCargo.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path, sep=";", encoding="utf-8-sig", decimal=",")
+    except Exception:
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            return {}
+    if "Cargo" not in df.columns or "Salário" not in df.columns:
+        return {}
+    df["Cargo_norm"] = df["Cargo"].astype(str).str.strip().str.casefold()
+    df["Salario_num"] = pd.to_numeric(df["Salário"], errors="coerce")
+    return (
+        df.dropna(subset=["Cargo_norm", "Salario_num"])
+        .groupby("Cargo_norm")["Salario_num"]
+        .mean()
+        .to_dict()
+    )
+
+
+def _find_avg_cost(cost_map: Dict[str, float], contains_text: str) -> float:
+    needle = contains_text.casefold()
+    vals = [v for k, v in cost_map.items() if needle in k]
+    if not vals:
+        return 0.0
+    return float(np.mean(vals))
+
+
+def _recompute_dpessoas_derived(dpessoas: pd.DataFrame) -> pd.DataFrame:
+    if dpessoas is None or dpessoas.empty:
+        return dpessoas
+    df = _standardize_cols(dpessoas.copy())
+    for col in ["QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios"]:
+        if col not in df.columns:
+            df[col] = 0
+    qtd_aux = pd.to_numeric(df["QtdAux"], errors="coerce").fillna(0.0)
+    qtd_lid = pd.to_numeric(df["QtdLid"], errors="coerce").fillna(0.0)
+    qtd_caixa = pd.to_numeric(df["Caixa"], errors="coerce").fillna(0.0)
+    qtd_aprendiz = pd.to_numeric(df["Aprendiz"], errors="coerce").fillna(0.0)
+    qtd_asg = pd.to_numeric(df["ASG"], errors="coerce").fillna(0.0)
+    qtd_consultor = pd.to_numeric(df["ConsultorNegocios"], errors="coerce").fillna(0.0)
+    df["TotalMapeado"] = qtd_aux + qtd_lid + qtd_caixa + qtd_aprendiz + qtd_asg + qtd_consultor
+    disp = _coerce_percent_0_1(df.get("%disp", pd.Series(pd.NA, index=df.index)))
+    df["%disp"] = disp
+    df["%absent"] = (1.0 - disp).clip(lower=0.0, upper=1.0)
+    cost_map = _load_custo_por_cargo_map()
+    custo_aux = _find_avg_cost(cost_map, "auxiliar de vendas")
+    custo_lid = _find_avg_cost(cost_map, "lider de vendas") or _find_avg_cost(cost_map, "líder de vendas")
+    custo_aprendiz = _find_avg_cost(cost_map, "aprendiz")
+    custo_caixa = _find_avg_cost(cost_map, "caixa")
+    custo_asg = _find_avg_cost(cost_map, "asg")
+    custo_consultor = _find_avg_cost(cost_map, "consultor")
+    df["SalarioMapeado"] = (
+        qtd_aux * custo_aux
+        + qtd_lid * custo_lid
+        + qtd_caixa * custo_caixa
+        + qtd_aprendiz * custo_aprendiz
+        + qtd_asg * custo_asg
+        + qtd_consultor * custo_consultor
+    )
+    return df
+
+
+def _recompute_destrutura_derived(destrutura: pd.DataFrame, faturamento: pd.DataFrame) -> pd.DataFrame:
+    if destrutura is None or destrutura.empty:
+        return destrutura
+    df = destrutura.copy()
+    if faturamento is None or faturamento.empty:
+        return df
+    ff = faturamento.copy()
+    if "Loja" not in ff.columns:
+        return df
+    data_col = "Data" if "Data" in ff.columns else ("DataPedido" if "DataPedido" in ff.columns else None)
+    if data_col is None:
+        return df
+    ff["Loja"] = ff["Loja"].astype(str).str.strip()
+    ff[data_col] = pd.to_datetime(ff[data_col], errors="coerce", dayfirst=True)
+    ff = ff.dropna(subset=["Loja", data_col])
+    if ff.empty:
+        return df
+    ff["_ym"] = ff[data_col].dt.to_period("M")
+    dias_mes = ff.groupby(["Loja", "_ym"])[data_col].nunique().reset_index(name="_dias")
+    media_dias = dias_mes.groupby("Loja")["_dias"].mean().reset_index(name="DiasOperacionaisMes")
+    if "Loja" in df.columns:
+        df = df.merge(media_dias, on="Loja", how="left", suffixes=("", "_deriv"))
+        if "DiasOperacionaisMes_deriv" in df.columns:
+            df["DiasOperacionaisMes"] = pd.to_numeric(df["DiasOperacionaisMes_deriv"], errors="coerce").combine_first(
+                pd.to_numeric(df.get("DiasOperacionaisMes"), errors="coerce")
+            )
+            df = df.drop(columns=["DiasOperacionaisMes_deriv"])
+    return df
+
+
+def _recompute_findicadores_local(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for c in ["BaseTotal", "BaseAtiva", "A0", "A1aA3", "Inicios", "Reinicios", "Recuperados", "I4aI6", "ReceitaTotalMes"]:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    if {"A0", "A1aA3"}.issubset(out.columns):
+        out["A0aA3"] = out["A0"].fillna(0) + out["A1aA3"].fillna(0)
+    if {"BaseAtiva", "BaseTotal"}.issubset(out.columns):
+        out["%Ativos"] = ((out["BaseAtiva"] / out["BaseTotal"].replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    if {"Inicios", "BaseAtiva"}.issubset(out.columns):
+        out["TaxaInicios"] = ((out["Inicios"] / out["BaseAtiva"].replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    if {"Recuperados", "I4aI6"}.issubset(out.columns):
+        out["TaxaReativacao"] = ((out["Recuperados"] / out["I4aI6"].replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    elif {"Reinicios", "BaseAtiva"}.issubset(out.columns):
+        out["TaxaReativacao"] = ((out["Reinicios"] / out["BaseAtiva"].replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    if {"Reinicios", "BaseAtiva"}.issubset(out.columns):
+        out["TaxaReinicios"] = ((out["Reinicios"] / out["BaseAtiva"].replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+    return out
+
+
+def _refresh_dependent_bases(changed_dataset: str) -> None:
+    if changed_dataset == "dAmostras":
+        return
+    if changed_dataset in ("dPessoas",):
+        st.session_state["dPessoas"] = _recompute_dpessoas_derived(st.session_state.get("dPessoas"))
+    if changed_dataset in ("dEstrutura", "fFaturamento2"):
+        st.session_state["dEstrutura"] = _recompute_destrutura_derived(
+            st.session_state.get("dEstrutura"),
+            st.session_state.get("fFaturamento2"),
+        )
+    if changed_dataset in ("dPessoas", "dEstrutura", "fFaturamento2", "fIndicadores"):
+        st.session_state["fIndicadores"] = merge_indicadores_from_faturamento(
+            _recompute_findicadores_local(st.session_state.get("fIndicadores")),
+            st.session_state.get("fFaturamento2"),
+            st.session_state.get("dEstrutura"),
+        )
 def render_append(nome: str, schema_fn, subset_cols):
     """Renderiza o uploader incremental e aplica validação antes de anexar dados."""
     schema = schema_fn()
     up = st.file_uploader(f"Upload CSV para acrescentar em {nome}", type=["csv"], key=f"up_append_{nome}")
     if up is not None:
         df_up = read_csv_with_schema(up, schema)
-        ok, errs = validate_df(df_up, schema)
-        if ok:
-            st.session_state[nome] = append_and_dedup(st.session_state[nome], df_up, subset_cols)
+        df_up = _normalize_cols_for_dataset(df_up, nome)
+        before_drop = len(df_up)
+        df_up = _drop_total_rows_for_upload(df_up, nome)
+        dropped_total_rows = max(0, before_drop - len(df_up))
+        if dropped_total_rows > 0:
+            st.warning(
+                f"Foram ignoradas {dropped_total_rows} linha(s) agregada(s) "
+                "(ex.: TOTAL/0). Envie apenas linhas de loja."
+            )
+        critical_cols, _ = get_upload_column_rules(nome)
+        allowed_cols = [c for c in critical_cols if c in df_up.columns]
+        if not allowed_cols:
+            st.error("Nenhuma coluna crítica foi encontrada no arquivo de upload.")
+        else:
+            work_up = df_up[[c for c in dict.fromkeys((subset_cols or []) + allowed_cols) if c in df_up.columns]].copy()
+            work_up = work_up.dropna(how="all")
+            if work_up.empty:
+                st.error("Upload sem linhas válidas para atualização.")
+                st.dataframe(st.session_state[nome].tail(100), use_container_width=True)
+                return
+            st.session_state[nome] = _upsert_critical_columns(
+                st.session_state.get(nome),
+                work_up,
+                subset_cols,
+                critical_cols,
+            )
             if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
-            if nome in ("fIndicadores", "fFaturamento2", "dEstrutura"):
-                st.session_state["fIndicadores"] = merge_indicadores_from_faturamento(
-                    st.session_state.get("fIndicadores"),
-                    st.session_state.get("fFaturamento2"),
-                    st.session_state.get("dEstrutura"),
-                )
+            _refresh_dependent_bases(nome)
             st.session_state["_data_version"] = (time.time(),)
             st.success(f"{nome} atualizado. Linhas totais: {len(st.session_state[nome])}")
-        else:
-            st.error("; ".join(errs))
     st.dataframe(st.session_state[nome].tail(100), use_container_width=True)
 # =============================================================================
 # Cache de treinamento

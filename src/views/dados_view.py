@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
@@ -17,6 +18,7 @@ from src.logic.core.logic import (
     get_schema_fFaturamento2,
     get_schema_fIndicadores,
     prepare_training_dataframe,
+    get_upload_column_rules,
     render_append,
     _assign_porte_cluster,
     _compute_porte_cluster_context,
@@ -24,6 +26,35 @@ from src.logic.core.logic import (
     _is_loja_grande,
 )
 from src.logic.data.buscaDeLojas import _ensure_loja_key
+
+
+def _download_df_without_total_row(nome: str, df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or nome != "fIndicadores":
+        return df
+    out = df.copy()
+    keep = pd.Series([True] * len(out), index=out.index)
+    if "Loja" in out.columns:
+        loja = out["Loja"].astype(str).str.strip().str.upper()
+        keep &= loja != "TOTAL"
+    for col in ("Estado", "Praça", "Praca"):
+        if col in out.columns:
+            vals = out[col].astype(str).str.strip().str.upper()
+            keep &= vals != "TOTAL"
+    return out.loc[keep].reset_index(drop=True)
+
+
+def _persist_session_data(paths: Dict[str, Path]) -> None:
+    nomes = ["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"]
+    for nome in nomes:
+        df = st.session_state.get(nome)
+        if df is None:
+            continue
+        df_out = _download_df_without_total_row(nome, df)
+        target_path = paths.get(nome)
+        if target_path is None:
+            continue
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        df_out.to_csv(target_path, index=False, sep=";", decimal=",", encoding="utf-8-sig")
 
 
 # =============================================================================
@@ -86,12 +117,9 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
 
             if st.session_state.get("downloads_ready"):
                 for nome in ["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"]:
-                    path = paths.get(nome)
-                    if path and path.exists():
-                        csv_bytes = path.read_bytes()
-                    else:
-                        df = st.session_state[nome]
-                        csv_bytes = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+                    df = st.session_state[nome]
+                    df_out = _download_df_without_total_row(nome, df)
+                    csv_bytes = df_out.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
                     st.download_button(
                         label=f"⬇️ Baixar {nome}.csv",
                         data=csv_bytes,
@@ -104,18 +132,65 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
         # Upload
         # =============================================================================
         with aba_upload:
-            st.caption("Envie arquivos para ACRESCENTAR dados à base atual. Entradas duplicadas são deduplicadas por chaves básicas.")
+            st.caption("Envie arquivos para atualizar dados críticos. As colunas derivadas são recalculadas automaticamente após o upload.")
             tabs = st.tabs(["dAmostras", "dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"])
             with tabs[0]:
+                crit, der = get_upload_column_rules("dAmostras")
+                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
                 render_append("dAmostras", get_schema_dAmostras, ["Loja", "Processo", "Amostra"])
             with tabs[1]:
+                crit, der = get_upload_column_rules("dEstrutura")
+                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
                 render_append("dEstrutura", get_schema_dEstrutura, ["Loja"])
             with tabs[2]:
+                crit, der = get_upload_column_rules("dPessoas")
+                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
                 render_append("dPessoas", get_schema_dPessoas, ["Loja"])
             with tabs[3]:
-                render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "CodPedido"])
+                crit, der = get_upload_column_rules("fFaturamento2")
+                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.caption("Colunas derivadas impactadas em outras bases são recalculadas automaticamente.")
+                render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "CodPedido", "Data", "DataPedido"])
             with tabs[4]:
+                crit, der = get_upload_column_rules("fIndicadores")
+                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
                 render_append("fIndicadores", get_schema_fIndicadores, ["Loja"])
+            st.divider()
+            st.warning(
+                "⚠️ Os dados importados ficam salvos apenas na sua sessão atual. "
+                "Para salvar definitivamente no sistema e disponibilizar para outros usuários, "
+                "clique em **Salvar alterações em disco**."
+            )
+
+            @st.dialog("Confirmar salvamento no sistema")
+            def _confirmar_salvar_em_disco() -> None:
+                st.markdown(
+                    "Você está prestes a substituir os arquivos oficiais do sistema com os dados atuais da sessão.\n\n"
+                    "**Verifique se os dados são confiáveis e foram revisados**, pois essa ação impacta os próximos acessos de todos os usuários."
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Confirmar e salvar", type="primary", use_container_width=True):
+                        try:
+                            _persist_session_data(paths)
+                            st.session_state["save_disk_success"] = (
+                                "Alterações salvas em data/*.csv com sucesso."
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Falha ao salvar alterações em disco: {exc}")
+                with c2:
+                    if st.button("Cancelar", use_container_width=True):
+                        st.rerun()
+
+            if st.button("Salvar alterações em disco", use_container_width=True, type="primary"):
+                _confirmar_salvar_em_disco()
+            if st.session_state.get("save_disk_success"):
+                st.success(st.session_state.pop("save_disk_success"))
 
         # =============================================================================
         # Critérios
@@ -171,27 +246,27 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
             receita = (
                 pd.to_numeric(train_norm["ReceitaTotalMes"], errors="coerce")
                 if "ReceitaTotalMes" in train_norm.columns
-                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+                else pd.Series(np.nan, index=train_norm.index, dtype="float64")
             )
             total_map = (
                 pd.to_numeric(train_norm["TotalMapeado"], errors="coerce")
                 if "TotalMapeado" in train_norm.columns
-                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+                else pd.Series(np.nan, index=train_norm.index, dtype="float64")
             )
             salario_map = (
                 pd.to_numeric(train_norm["SalarioMapeado"], errors="coerce")
                 if "SalarioMapeado" in train_norm.columns
-                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+                else pd.Series(np.nan, index=train_norm.index, dtype="float64")
             )
             iaf_25 = (
                 pd.to_numeric(train_norm["%IAF25"], errors="coerce")
                 if "%IAF25" in train_norm.columns
-                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+                else pd.Series(np.nan, index=train_norm.index, dtype="float64")
             )
             qtd_aux = (
                 pd.to_numeric(train_norm["QtdAux"], errors="coerce")
                 if "QtdAux" in train_norm.columns
-                else pd.Series(pd.NA, index=train_norm.index, dtype="float64")
+                else pd.Series(np.nan, index=train_norm.index, dtype="float64")
             )
             qtd_aux_real = total_map.where(total_map.notna() & (total_map > 0), qtd_aux)
 
