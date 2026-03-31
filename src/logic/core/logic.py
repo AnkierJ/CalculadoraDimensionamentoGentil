@@ -3137,6 +3137,139 @@ def _normalize_bcps_token(value: object) -> str:
     return text.upper()
 
 
+def _is_valid_loja_name(value: object) -> bool:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return False
+    text = str(value).strip()
+    if not text:
+        return False
+    upper = text.upper()
+    return upper not in {"NAN", "NONE", "<NA>", "TOTAL"}
+
+
+def _build_store_identity_dictionary() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """Cria dicionários canônicos para vincular BCPS e Loja entre as bases da sessão."""
+    loja_norm_to_loja: Dict[str, str] = {}
+    loja_norm_to_bcps: Dict[str, str] = {}
+    bcps_to_loja: Dict[str, str] = {}
+
+    # fIndicadores é a principal referência de nomenclatura canônica do sistema.
+    sources = ["fIndicadores", "fFaturamento2", "dEstrutura", "dPessoas"]
+    for nome in sources:
+        df = st.session_state.get(nome)
+        if df is None or df.empty or "Loja" not in df.columns:
+            continue
+        work = _normalize_cols_for_dataset(df, nome)
+        work = _ensure_loja_key(work)
+        if "Loja_norm" not in work.columns:
+            continue
+
+        loja = work["Loja"].fillna("").astype(str).str.strip()
+        valid_loja = loja.apply(_is_valid_loja_name)
+        if valid_loja.any():
+            loja_rows = work.loc[valid_loja, ["Loja_norm", "Loja"]].copy()
+            loja_rows = loja_rows.dropna(subset=["Loja_norm"]) 
+            loja_rows["Loja"] = loja_rows["Loja"].astype(str).str.strip()
+            if not loja_rows.empty:
+                loja_mode = (
+                    loja_rows.groupby("Loja_norm")["Loja"]
+                    .agg(lambda s: s.value_counts().index[0])
+                    .to_dict()
+                )
+                for loja_norm, loja_name in loja_mode.items():
+                    if loja_norm and loja_norm not in loja_norm_to_loja:
+                        loja_norm_to_loja[loja_norm] = loja_name
+
+        bcps_col = _find_column_by_normalized_name(work, "bcps")
+        if bcps_col is None:
+            continue
+        bcps = work[bcps_col].apply(_normalize_bcps_token)
+        pair_mask = valid_loja & bcps.ne("")
+        if not pair_mask.any():
+            continue
+
+        pair_df = work.loc[pair_mask, ["Loja_norm", "Loja"]].copy()
+        pair_df["_bcps"] = bcps.loc[pair_mask].astype(str)
+        pair_df = pair_df.dropna(subset=["Loja_norm"]) 
+        pair_df["Loja"] = pair_df["Loja"].astype(str).str.strip()
+        if pair_df.empty:
+            continue
+
+        bcps_mode = (
+            pair_df.groupby("_bcps")["Loja"]
+            .agg(lambda s: s.value_counts().index[0])
+            .to_dict()
+        )
+        for bcps_key, loja_name in bcps_mode.items():
+            if bcps_key and bcps_key not in bcps_to_loja:
+                bcps_to_loja[bcps_key] = loja_name
+
+        loja_bcps_mode = (
+            pair_df.groupby("Loja_norm")["_bcps"]
+            .agg(lambda s: s.value_counts().index[0])
+            .to_dict()
+        )
+        for loja_norm, bcps_key in loja_bcps_mode.items():
+            if loja_norm and bcps_key and loja_norm not in loja_norm_to_bcps:
+                loja_norm_to_bcps[loja_norm] = bcps_key
+
+    return bcps_to_loja, loja_norm_to_loja, loja_norm_to_bcps
+
+
+def _apply_store_identity_dictionary() -> Dict[str, int]:
+    """Padroniza BCPS/Loja em todas as bases da sessão usando dicionário canônico."""
+    bcps_to_loja, loja_norm_to_loja, loja_norm_to_bcps = _build_store_identity_dictionary()
+    if not bcps_to_loja and not loja_norm_to_loja:
+        return {"loja_updates": 0, "bcps_fills": 0}
+
+    stats = {"loja_updates": 0, "bcps_fills": 0}
+    for nome in ["dEstrutura", "dPessoas", "fFaturamento2", "fIndicadores"]:
+        df = st.session_state.get(nome)
+        if df is None or df.empty or "Loja" not in df.columns:
+            continue
+        out = _normalize_cols_for_dataset(df, nome)
+        out = _ensure_loja_key(out)
+        if "Loja_norm" not in out.columns:
+            st.session_state[nome] = out
+            continue
+
+        original_loja = out["Loja"].fillna("").astype(str).str.strip()
+
+        bcps_col = _find_column_by_normalized_name(out, "bcps")
+        if bcps_col is not None and bcps_to_loja:
+            bcps_key = out[bcps_col].apply(_normalize_bcps_token)
+            mapped_loja = bcps_key.map(bcps_to_loja)
+            can_update_loja = mapped_loja.notna() & mapped_loja.astype(str).str.strip().ne("")
+            if can_update_loja.any():
+                stats["loja_updates"] += int(
+                    original_loja.loc[can_update_loja].ne(mapped_loja.loc[can_update_loja]).sum()
+                )
+                out.loc[can_update_loja, "Loja"] = mapped_loja.loc[can_update_loja]
+
+        out = _ensure_loja_key(out)
+        mapped_case = out["Loja_norm"].map(loja_norm_to_loja)
+        can_update_case = mapped_case.notna() & mapped_case.astype(str).str.strip().ne("")
+        if can_update_case.any():
+            loja_now = out["Loja"].fillna("").astype(str).str.strip()
+            stats["loja_updates"] += int(loja_now.loc[can_update_case].ne(mapped_case.loc[can_update_case]).sum())
+            out.loc[can_update_case, "Loja"] = mapped_case.loc[can_update_case]
+
+        if bcps_col is not None and loja_norm_to_bcps:
+            bcps_text = out[bcps_col].fillna("").astype(str).str.strip()
+            bcps_blank = bcps_text.str.upper().isin(["", "NAN", "NONE", "<NA>"])
+            mapped_bcps = out["Loja_norm"].map(loja_norm_to_bcps)
+            can_fill_bcps = bcps_blank & mapped_bcps.notna() & mapped_bcps.astype(str).str.strip().ne("")
+            if can_fill_bcps.any():
+                stats["bcps_fills"] += int(can_fill_bcps.sum())
+                out.loc[can_fill_bcps, bcps_col] = mapped_bcps.loc[can_fill_bcps]
+
+        if "Loja_norm" in out.columns:
+            out = out.drop(columns=["Loja_norm"])
+        st.session_state[nome] = out
+
+    return stats
+
+
 def _find_column_by_normalized_name(df: pd.DataFrame, normalized_name: str) -> Optional[str]:
     for col in df.columns:
         if _normalize_col_name(col) == normalized_name:
@@ -3610,8 +3743,20 @@ def render_append(nome: str, schema_fn, subset_cols):
                     st.info(f"{filled_praca} linha(s) de fFaturamento2 tiveram Praça preenchida pela referência de loja.")
             if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
+
+            _apply_store_identity_dictionary()
             
             _refresh_dependent_bases(nome)
+
+            identity_stats = _apply_store_identity_dictionary()
+            if identity_stats.get("loja_updates", 0) > 0:
+                st.info(
+                    f"{identity_stats['loja_updates']} linha(s) tiveram nome de loja padronizado pelo dicionario BCPS/Loja."
+                )
+            if identity_stats.get("bcps_fills", 0) > 0:
+                st.info(
+                    f"{identity_stats['bcps_fills']} linha(s) tiveram BCPS preenchido pelo dicionario BCPS/Loja."
+                )
             
             # Para dPessoas, remover lojas sem time comercial (TotalMapeado == 0)
             # Isso é feito DEPOIS de _refresh_dependent_bases para garantir que TotalMapeado está calculado
