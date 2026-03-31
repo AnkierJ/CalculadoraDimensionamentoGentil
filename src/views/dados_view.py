@@ -146,7 +146,10 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                 render_append("dEstrutura", get_schema_dEstrutura, ["Loja"])
             with tabs[2]:
                 crit, der = get_upload_column_rules("dPessoas")
-                st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
+                st.info(
+                    "**Colunas críticas (atualizadas pelo upload):** todas as colunas enviadas, "
+                    "exceto TOTAL, TotalMapeado, SalarioMapeado e %disp."
+                )
                 st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
                 render_append("dPessoas", get_schema_dPessoas, ["Loja"])
             with tabs[3]:

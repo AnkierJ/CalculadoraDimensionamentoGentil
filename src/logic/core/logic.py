@@ -2467,6 +2467,13 @@ ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
         "SalarioMap/Mes": "SalarioMapeado",
         "Salario Map/Mes": "SalarioMapeado",
         "Salario Mapeado": "SalarioMapeado",
+        "AnalisisSupervisores": "Analistas&Supervisores",
+        "Análise & Supervisores": "Analistas&Supervisores",
+        "Análises & Supervisores": "Analistas&Supervisores",
+        "Analises & Supervisores": "Analistas&Supervisores",
+        "Segurança": "Seguranca",
+        "Segurança Patrimonial": "Seguranca",
+        "Seguranca_Patrimonial": "Seguranca",
     },
 }
 @st.cache_data(show_spinner=False)
@@ -2933,7 +2940,7 @@ def append_and_dedup(base: pd.DataFrame, new: pd.DataFrame, subset_cols: List[st
 CRITICAL_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
     "dAmostras": ["Loja", "Processo", "Amostra", "Minutos"],
     "dEstrutura": ["Loja", "Area Total", "Caixas", "Esp Conv", "Copa", "Escritorio", "Shopping", "HorasOperacionais"],
-    "dPessoas": ["Loja", "QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "%disp"],
+    "dPessoas": ["Loja", "QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "GVO", "GCVO", "GPVO", "ConsultorVendas", "Estoquistas", "Seguranca", "Analistas&Supervisores", "Assistentes", "%absent"],
     "fFaturamento2": ["Loja", "Data", "Faturamento", "Itens", "Boletos"],
     "fIndicadores": [
         "BCPS", "SAP", "Estado", "Praça", "Loja", "BaseTotal", "BaseAtiva", "Churn", "ReceitaTotalMes",
@@ -2947,7 +2954,7 @@ CRITICAL_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
 DERIVED_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
     "dAmostras": ["Tempo Médio", "Desvio", "Número de Amostras"],
     "dEstrutura": ["DiasOperacionaisMes"],
-    "dPessoas": ["TotalMapeado", "SalarioMapeado", "%absent"],
+    "dPessoas": ["TOTAL", "TotalMapeado", "SalarioMapeado", "%disp", "%absent"],
     "fFaturamento2": [],
     "fIndicadores": [
         "A0aA3", "%Ativos", "TaxaInicios", "TaxaReativacao", "TaxaReinicios",
@@ -2959,6 +2966,29 @@ DERIVED_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
 
 def get_upload_column_rules(nome: str) -> Tuple[List[str], List[str]]:
     return CRITICAL_COLUMNS_BY_DATASET.get(nome, []), DERIVED_COLUMNS_BY_DATASET.get(nome, [])
+
+
+DPESSOAS_UPLOAD_EXCLUDED_COLUMNS = {"TOTAL", "TotalMapeado", "SalarioMapeado", "%disp"}
+
+
+def _resolve_dpessoas_upload_critical_columns(
+    base_df: Optional[pd.DataFrame],
+    new_df: Optional[pd.DataFrame],
+    key_cols: List[str],
+) -> List[str]:
+    ordered_cols: List[str] = []
+    for cols in (
+        list(base_df.columns) if base_df is not None else [],
+        list(new_df.columns) if new_df is not None else [],
+        list(key_cols or []),
+    ):
+        for col in cols:
+            if col in ordered_cols:
+                continue
+            if col in DPESSOAS_UPLOAD_EXCLUDED_COLUMNS:
+                continue
+            ordered_cols.append(col)
+    return ordered_cols
 
 
 def _normalize_cols_for_dataset(df: pd.DataFrame, nome: str) -> pd.DataFrame:
@@ -3036,10 +3066,36 @@ def _load_custo_por_cargo_map() -> Dict[str, float]:
             df = pd.read_csv(path)
         except Exception:
             return {}
-    if "Cargo" not in df.columns or "Salário" not in df.columns:
+    cargo_col = None
+    salario_col = None
+    for col in df.columns:
+        col_norm = _normalize_col_name(col)
+        if cargo_col is None and col_norm == "cargo":
+            cargo_col = col
+        if salario_col is None and (col_norm == "salario" or "salari" in col_norm):
+            salario_col = col
+    if cargo_col is None:
+        for col in df.columns:
+            text = str(col).strip().casefold()
+            if "cargo" in text:
+                cargo_col = col
+                break
+    if salario_col is None:
+        for col in df.columns:
+            text = str(col).strip().casefold()
+            if "sal" in text and ("rio" in text or "ari" in text):
+                salario_col = col
+                break
+    if cargo_col is None or salario_col is None:
+        if len(df.columns) >= 2:
+            cargo_col = df.columns[0]
+            salario_col = df.columns[1]
+        else:
+            return {}
+    if cargo_col not in df.columns or salario_col not in df.columns:
         return {}
-    df["Cargo_norm"] = df["Cargo"].astype(str).str.strip().str.casefold()
-    df["Salario_num"] = pd.to_numeric(df["Salário"], errors="coerce")
+    df["Cargo_norm"] = df[cargo_col].astype(str).str.strip().str.casefold()
+    df["Salario_num"] = df[salario_col].apply(lambda v: safe_float(v, np.nan))
     return (
         df.dropna(subset=["Cargo_norm", "Salario_num"])
         .groupby("Cargo_norm")["Salario_num"]
@@ -3060,7 +3116,7 @@ def _recompute_dpessoas_derived(dpessoas: pd.DataFrame) -> pd.DataFrame:
     if dpessoas is None or dpessoas.empty:
         return dpessoas
     df = _standardize_cols(dpessoas.copy())
-    for col in ["QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios"]:
+    for col in ["QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "GVO", "GCVO", "GPVO", "ConsultorVendas", "Estoquistas", "Seguranca", "Analistas&Supervisores", "Assistentes"]:
         if col not in df.columns:
             df[col] = 0
     qtd_aux = pd.to_numeric(df["QtdAux"], errors="coerce").fillna(0.0)
@@ -3069,16 +3125,34 @@ def _recompute_dpessoas_derived(dpessoas: pd.DataFrame) -> pd.DataFrame:
     qtd_aprendiz = pd.to_numeric(df["Aprendiz"], errors="coerce").fillna(0.0)
     qtd_asg = pd.to_numeric(df["ASG"], errors="coerce").fillna(0.0)
     qtd_consultor = pd.to_numeric(df["ConsultorNegocios"], errors="coerce").fillna(0.0)
-    df["TotalMapeado"] = qtd_aux + qtd_lid + qtd_caixa + qtd_aprendiz + qtd_asg + qtd_consultor
-    disp = _coerce_percent_0_1(df.get("%disp", pd.Series(pd.NA, index=df.index)))
-    df["%disp"] = disp
-    df["%absent"] = (1.0 - disp).clip(lower=0.0, upper=1.0)
+    qtd_gvo = pd.to_numeric(df["GVO"], errors="coerce").fillna(0.0)
+    qtd_gcvo = pd.to_numeric(df["GCVO"], errors="coerce").fillna(0.0)
+    qtd_gpvo = pd.to_numeric(df["GPVO"], errors="coerce").fillna(0.0)
+    qtd_consultor_vendas = pd.to_numeric(df["ConsultorVendas"], errors="coerce").fillna(0.0)
+    qtd_estoquistas = pd.to_numeric(df["Estoquistas"], errors="coerce").fillna(0.0)
+    qtd_seguranca = pd.to_numeric(df["Seguranca"], errors="coerce").fillna(0.0)
+    qtd_analise_supervisores = pd.to_numeric(df["Analistas&Supervisores"], errors="coerce").fillna(0.0)
+    qtd_assistentes = pd.to_numeric(df["Assistentes"], errors="coerce").fillna(0.0)
+    total_mapeado = qtd_aux + qtd_lid + qtd_caixa + qtd_aprendiz + qtd_asg + qtd_consultor
+    total_geral = total_mapeado + qtd_gvo + qtd_gcvo + qtd_gpvo + qtd_consultor_vendas + qtd_estoquistas + qtd_seguranca + qtd_analise_supervisores + qtd_assistentes
+    df["TOTAL"] = total_geral
+    df["TotalMapeado"] = total_mapeado
+    absent = _coerce_percent_0_1(df.get("%absent", pd.Series(pd.NA, index=df.index)))
+    disp_from_absent = (1.0 - absent).clip(lower=0.0, upper=1.0)
+    disp_raw = _coerce_percent_0_1(df.get("%disp", pd.Series(pd.NA, index=df.index)))
+    disp = disp_from_absent.combine_first(disp_raw)
+    df["%disp"] = disp.clip(lower=0.0, upper=1.0)
+    df["%absent"] = (1.0 - df["%disp"]).clip(lower=0.0, upper=1.0)
     cost_map = _load_custo_por_cargo_map()
     custo_aux = _find_avg_cost(cost_map, "auxiliar de vendas")
     custo_lid = _find_avg_cost(cost_map, "lider de vendas") or _find_avg_cost(cost_map, "líder de vendas")
     custo_aprendiz = _find_avg_cost(cost_map, "aprendiz")
     custo_caixa = _find_avg_cost(cost_map, "caixa")
-    custo_asg = _find_avg_cost(cost_map, "asg")
+    custo_asg = (
+        _find_avg_cost(cost_map, "asg")
+        or _find_avg_cost(cost_map, "servicos gerais")
+        or _find_avg_cost(cost_map, "serviços gerais")
+    )
     custo_consultor = _find_avg_cost(cost_map, "consultor")
     df["SalarioMapeado"] = (
         qtd_aux * custo_aux
@@ -3159,6 +3233,26 @@ def _refresh_dependent_bases(changed_dataset: str) -> None:
             st.session_state.get("fFaturamento2"),
             st.session_state.get("dEstrutura"),
         )
+
+
+def _filter_dpessoas_empty_timecardinal(df_dpessoas: pd.DataFrame) -> tuple[pd.DataFrame, List[str]]:
+    """Remove lojas com TotalMapeado == 0 e retorna (df limpo, lista de lojas desconsideradas)."""
+    if df_dpessoas is None or df_dpessoas.empty or "TotalMapeado" not in df_dpessoas.columns:
+        return df_dpessoas, []
+    
+    # Garante que TotalMapeado seja numérico
+    total_map = pd.to_numeric(df_dpessoas.get("TotalMapeado"), errors="coerce").fillna(0)
+    
+    # Identifica linhas com TotalMapeado == 0
+    mask_empty = total_map == 0
+    lojas_desconsideradas = df_dpessoas.loc[mask_empty, "Loja"].unique().tolist() if "Loja" in df_dpessoas.columns else []
+    
+    # Remove as linhas
+    df_limpo = df_dpessoas[~mask_empty].copy()
+    
+    return df_limpo, lojas_desconsideradas
+
+
 def render_append(nome: str, schema_fn, subset_cols):
     """Renderiza o uploader incremental e aplica validação antes de anexar dados."""
     schema = schema_fn()
@@ -3175,6 +3269,12 @@ def render_append(nome: str, schema_fn, subset_cols):
                 "(ex.: TOTAL/0). Envie apenas linhas de loja."
             )
         critical_cols, _ = get_upload_column_rules(nome)
+        if nome == "dPessoas":
+            critical_cols = _resolve_dpessoas_upload_critical_columns(
+                st.session_state.get(nome),
+                df_up,
+                subset_cols,
+            )
         allowed_cols = [c for c in critical_cols if c in df_up.columns]
         if not allowed_cols:
             st.error("Nenhuma coluna crítica foi encontrada no arquivo de upload.")
@@ -3193,8 +3293,27 @@ def render_append(nome: str, schema_fn, subset_cols):
             )
             if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
+            
             _refresh_dependent_bases(nome)
+            
+            # Para dPessoas, remover lojas sem time comercial (TotalMapeado == 0)
+            # Isso é feito DEPOIS de _refresh_dependent_bases para garantir que TotalMapeado está calculado
+            lojas_sem_time = []
+            if nome == "dPessoas":
+                st.session_state[nome], lojas_sem_time = _filter_dpessoas_empty_timecardinal(
+                    st.session_state[nome]
+                )
+            
             st.session_state["_data_version"] = (time.time(),)
+            
+            # Avisos de lojas desconsideradas
+            if lojas_sem_time:
+                lojas_str = ", ".join(lojas_sem_time)
+                st.warning(
+                    f"⚠️ As seguintes lojas foram desconsideradas por não terem time comercial "
+                    f"(TotalMapeado = 0): **{lojas_str}**"
+                )
+            
             st.success(f"{nome} atualizado. Linhas totais: {len(st.session_state[nome])}")
     st.dataframe(st.session_state[nome].tail(100), use_container_width=True)
 # =============================================================================
