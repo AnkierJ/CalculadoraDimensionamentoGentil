@@ -306,6 +306,8 @@ def get_schema_dPessoas() -> Dict[str, str]:
 def get_schema_fFaturamento2() -> Dict[str, str]:
     """Schema com os tipos esperados para a planilha fFaturamento2."""
     return {
+        "BCPS": "string",
+        "Praça": "string",
         "Loja": "string",
         "Data": "date",
         "NomeRevendedora": "string",

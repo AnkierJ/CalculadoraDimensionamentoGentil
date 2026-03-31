@@ -2475,6 +2475,13 @@ ALIASES_BY_SCHEMA: Dict[str, Dict[str, str]] = {
         "Segurança Patrimonial": "Seguranca",
         "Seguranca_Patrimonial": "Seguranca",
     },
+    "fFaturamento2": {
+        "BPCS": "BCPS",
+        "bpcs": "BCPS",
+        "Praca": "Praça",
+        "PRACA": "Praça",
+        "Praça": "Praça",
+    },
 }
 @st.cache_data(show_spinner=False)
 def _load_csv_cached(path: str, schema_name: str, file_version: object) -> pd.DataFrame:
@@ -2653,18 +2660,48 @@ def derive_indicadores_from_faturamento(
         return pd.DataFrame()
     res = pd.DataFrame(index=pd.Index(lojas, name="Loja"))
     res["Pedidos"] = orders.groupby("Loja")["PedidosCount"].sum()
-    if "Faturamento" in orders.columns:
-        receita_total = orders.groupby("Loja")["Faturamento"].sum()
-    else:
-        receita_total = pd.Series(0.0, index=res.index, dtype="float64")
+    retirada_pct = pd.Series(np.nan, index=res.index, dtype="float64")
+    if "Retirada" in orders.columns:
+        retirada_tokens = orders["Retirada"].astype(str).str.strip().str.upper()
+        retirada_flag = pd.Series(np.nan, index=orders.index, dtype="float64")
+        retirada_flag.loc[retirada_tokens.isin(TRUE_BOOL_VALUES)] = 1.0
+        retirada_flag.loc[retirada_tokens.isin(FALSE_BOOL_VALUES)] = 0.0
+        pedidos_count = pd.to_numeric(orders.get("PedidosCount"), errors="coerce").fillna(0.0)
+        retirada_pedidos = pedidos_count.where(retirada_flag == 1.0, 0.0)
+        retirada_num = retirada_pedidos.groupby(orders["Loja"]).sum()
+        retirada_den = pedidos_count.groupby(orders["Loja"]).sum().replace(0, np.nan)
+        retirada_pct = (retirada_num / retirada_den) * 100.0
+    orders_media = orders.copy()
     meses_total = pd.Series(0.0, index=res.index, dtype="float64")
     if "DataPedido" in orders.columns:
         datas = pd.to_datetime(orders["DataPedido"], errors="coerce")
         if datas.notna().any():
-            ym = datas.dt.to_period("M")
-            meses_df = pd.DataFrame({"Loja": orders["Loja"], "_ym": ym}).dropna(subset=["_ym"])
-            if not meses_df.empty:
-                meses_total = meses_df.groupby("Loja")["_ym"].nunique().astype(float)
+            base_media = orders.copy()
+            base_media["_data_pedido"] = datas
+            base_media = base_media.dropna(subset=["_data_pedido"])
+            if not base_media.empty:
+                base_media["_ym"] = base_media["_data_pedido"].dt.to_period("M")
+                meses_span = (
+                    base_media.groupby(["Loja", "_ym"], as_index=False)["_data_pedido"]
+                    .agg(min_data="min", max_data="max")
+                )
+                meses_span["inicio_mes"] = meses_span["_ym"].dt.to_timestamp(how="start")
+                meses_span["fim_mes"] = meses_span["_ym"].dt.to_timestamp(how="end").dt.normalize()
+                meses_span["mes_completo"] = (
+                    meses_span["min_data"].dt.normalize().eq(meses_span["inicio_mes"])
+                    & meses_span["max_data"].dt.normalize().eq(meses_span["fim_mes"])
+                )
+                meses_completos = meses_span.loc[meses_span["mes_completo"], ["Loja", "_ym"]]
+                if not meses_completos.empty:
+                    base_media = base_media.merge(meses_completos, on=["Loja", "_ym"], how="inner")
+                    orders_media = base_media[orders.columns].copy()
+                    meses_total = meses_completos.groupby("Loja")["_ym"].nunique().astype(float)
+                else:
+                    orders_media = orders.iloc[0:0].copy()
+    if "Faturamento" in orders_media.columns:
+        receita_total = orders_media.groupby("Loja")["Faturamento"].sum()
+    else:
+        receita_total = pd.Series(0.0, index=res.index, dtype="float64")
     meses_total = meses_total.reindex(res.index).fillna(0.0)
     meses_total = meses_total.where(meses_total > 0, float(meses_ano))
     meses_total = meses_total.clip(lower=1.0, upper=12.0)
@@ -2674,7 +2711,9 @@ def derive_indicadores_from_faturamento(
         res["ItensTotal"] = orders.groupby("Loja")["Itens"].sum()
     else:
         res["ItensTotal"] = 0.0
-    if "Boletos" in orders.columns:
+    if "Boletos" in orders_media.columns:
+        res["BoletosTotal"] = orders_media.groupby("Loja")["Boletos"].sum()
+    elif "Boletos" in orders.columns:
         res["BoletosTotal"] = orders.groupby("Loja")["Boletos"].sum()
     else:
         # Fallback para bases sem coluna Boletos.
@@ -2747,7 +2786,8 @@ def derive_indicadores_from_faturamento(
     receita = res["ReceitaTotalMes"].fillna(0.0).astype(float)
     itens_total = res["ItensTotal"].fillna(0.0).astype(float)
     boletos_total = res["BoletosTotal"].fillna(0.0).astype(float)
-    ticket_medio = receita_total / pedidos.replace(0, np.nan)
+    # Ticket médio por loja: faturamento total / boletos totais.
+    ticket_medio = receita_total / boletos_total.replace(0, np.nan)
     pedidos_dia = (pedidos / dias_total).replace([np.inf, -np.inf], np.nan)
     # Regra de negócio: pedidos/hora = pedidos/dia dividido por horas operacionais da loja
     pedidos_hora = (pedidos_dia / horas_loja.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
@@ -2758,6 +2798,7 @@ def derive_indicadores_from_faturamento(
     res["Faturamento/Hora"] = (receita / horas_mes_operacionais.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
     # Regra de negócio: Itens/Pedido = total de itens / total de boletos por loja.
     res["Itens/Pedido"] = (itens_total / boletos_total.replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    res["%Retirada"] = retirada_pct.reindex(res.index)
     res["ReaisPorAtivo"] = ticket_medio.replace([np.inf, -np.inf], np.nan)
     res = res.reset_index()
     res = res.drop(columns=[c for c in ["Pedidos", "ItensTotal", "BoletosTotal"] if c in res.columns])
@@ -2790,6 +2831,7 @@ def merge_indicadores_from_faturamento(
         merged = merged.drop(columns=["Loja_ffat"])
     cols_to_update = [
         "ReceitaTotalMes",
+        "%Retirada",
         "Pedidos/Dia",
         "Pedidos/Hora",
         "Faturamento/Hora",
@@ -2807,15 +2849,71 @@ def merge_indicadores_from_faturamento(
         merged = merged.drop(columns=[derived_col])
     if "Loja_norm" in merged.columns:
         merged = merged.drop(columns=["Loja_norm"])
-    if "TaxaReinicios" in merged.columns:
-        reinicios = pd.to_numeric(merged.get("Reinicios"), errors="coerce")
-        base_ativa = pd.to_numeric(merged.get("BaseAtiva"), errors="coerce")
-        taxa_reinicios = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
-        merged["TaxaReinicios"] = taxa_reinicios.combine_first(pd.to_numeric(merged["TaxaReinicios"], errors="coerce"))
+    total_mask = pd.Series([False] * len(merged), index=merged.index)
+    for col in ("Estado", "Praça", "Praca", "Loja"):
+        if col in merged.columns:
+            total_mask = total_mask | (merged[col].astype(str).str.strip().str.upper() == "TOTAL")
+    loja_mask = ~total_mask
+    if "Loja" in merged.columns:
+        loja_values = merged["Loja"].astype(str).str.strip()
+        loja_mask = loja_mask & loja_values.ne("") & loja_values.str.upper().ne("NAN")
+
+    if {"A0", "A1aA3"}.issubset(merged.columns):
+        a0 = pd.to_numeric(merged["A0"], errors="coerce")
+        a1a3 = pd.to_numeric(merged["A1aA3"], errors="coerce")
+        merged["A0aA3"] = a0.fillna(0.0) + a1a3.fillna(0.0)
+
+    if {"BaseAtiva", "BaseTotal"}.issubset(merged.columns):
+        base_ativa = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
+        base_total = pd.to_numeric(merged["BaseTotal"], errors="coerce")
+        merged["%Ativos"] = ((base_ativa / base_total.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+
+    if {"Recuperados", "I4aI6"}.issubset(merged.columns):
+        recuperados = pd.to_numeric(merged["Recuperados"], errors="coerce")
+        i4a6 = pd.to_numeric(merged["I4aI6"], errors="coerce")
+        taxa_reativacao = ((recuperados / i4a6.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+        if "TaxaReativacao" in merged.columns:
+            merged["TaxaReativacao"] = taxa_reativacao.combine_first(pd.to_numeric(merged["TaxaReativacao"], errors="coerce"))
+        else:
+            merged["TaxaReativacao"] = taxa_reativacao
     elif {"Reinicios", "BaseAtiva"}.issubset(merged.columns):
         reinicios = pd.to_numeric(merged["Reinicios"], errors="coerce")
         base_ativa = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
-        merged["TaxaReinicios"] = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+        taxa_reativacao = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+        if "TaxaReativacao" in merged.columns:
+            merged["TaxaReativacao"] = taxa_reativacao.combine_first(pd.to_numeric(merged["TaxaReativacao"], errors="coerce"))
+        else:
+            merged["TaxaReativacao"] = taxa_reativacao
+
+    if {"Reinicios", "BaseAtiva"}.issubset(merged.columns):
+        reinicios = pd.to_numeric(merged["Reinicios"], errors="coerce")
+        base_ativa = pd.to_numeric(merged["BaseAtiva"], errors="coerce")
+        taxa_reinicios = ((reinicios / base_ativa.replace(0, np.nan)) * 100.0).replace([np.inf, -np.inf], np.nan)
+        if "TaxaReinicios" in merged.columns:
+            merged["TaxaReinicios"] = taxa_reinicios.combine_first(pd.to_numeric(merged["TaxaReinicios"], errors="coerce"))
+        else:
+            merged["TaxaReinicios"] = taxa_reinicios
+
+    if "BaseTotal" in merged.columns:
+        base_total = pd.to_numeric(merged["BaseTotal"], errors="coerce")
+        base_total_ref = base_total.where(loja_mask).sum(min_count=1)
+        if pd.notna(base_total_ref) and float(base_total_ref) > 0:
+            pct_base_total = ((base_total / float(base_total_ref)) * 100.0).replace([np.inf, -np.inf], np.nan)
+            merged["%daBaseTotal"] = pct_base_total.where(loja_mask, np.nan)
+
+    if "ReceitaTotalMes" in merged.columns:
+        receita = pd.to_numeric(merged["ReceitaTotalMes"], errors="coerce")
+        receita_ref = receita.where(loja_mask).sum(min_count=1)
+        if pd.notna(receita_ref) and float(receita_ref) > 0:
+            pct_fat_total = ((receita / float(receita_ref)) * 100.0).replace([np.inf, -np.inf], np.nan)
+            merged["%doFatTotal"] = pct_fat_total.where(loja_mask, np.nan)
+
+    if "Loja" in merged.columns:
+        loja_clean = merged["Loja"].fillna("").astype(str).str.strip()
+        total_like = loja_clean.str.upper().eq("TOTAL")
+        valid_loja = loja_clean.ne("") & loja_clean.str.upper().ne("NAN") & loja_clean.str.upper().ne("NONE")
+        merged = merged.loc[total_like | valid_loja].copy()
+        merged["Loja"] = loja_clean.loc[merged.index]
     merged = _recompute_total_row_findicadores(merged)
     return merged
 
@@ -2941,12 +3039,11 @@ CRITICAL_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
     "dAmostras": ["Loja", "Processo", "Amostra", "Minutos"],
     "dEstrutura": ["Loja", "Area Total", "Caixas", "Esp Conv", "Copa", "Escritorio", "Shopping", "HorasOperacionais"],
     "dPessoas": ["Loja", "QtdAux", "QtdLid", "Caixa", "Aprendiz", "ASG", "ConsultorNegocios", "GVO", "GCVO", "GPVO", "ConsultorVendas", "Estoquistas", "Seguranca", "Analistas&Supervisores", "Assistentes", "%absent"],
-    "fFaturamento2": ["Loja", "Data", "Faturamento", "Itens", "Boletos"],
+    "fFaturamento2": ["Loja", "Data", "BCPS", "Praça", "Faturamento", "Itens", "Boletos"],
     "fIndicadores": [
-        "BCPS", "SAP", "Estado", "Praça", "Loja", "BaseTotal", "BaseAtiva", "Churn", "ReceitaTotalMes",
-        "ReaisPorAtivo", "AtividadeER", "A0", "A1aA3", "I4aI6", "Inicios", "Reinicios", "Recuperados",
-        "%daBaseTotal", "%doFatTotal", "%Ativos", "A0aA3", "TaxaReativacao", "TaxaReinicios", "%Retirada",
-        "Faturamento/Hora", "Pedidos/Hora", "Pedidos/Dia", "Itens/Pedido", "%IAF25",
+        "BCPS", "SAP", "Estado", "Praça", "Loja", "BaseTotal", "BaseAtiva", "Churn",
+        "AtividadeER", "A0", "A1aA3", "I4aI6", "Inicios", "Reinicios", "Recuperados",
+        "%IAF25",
     ],
 }
 
@@ -2957,9 +3054,9 @@ DERIVED_COLUMNS_BY_DATASET: Dict[str, List[str]] = {
     "dPessoas": ["TOTAL", "TotalMapeado", "SalarioMapeado", "%disp", "%absent"],
     "fFaturamento2": [],
     "fIndicadores": [
-        "A0aA3", "%Ativos", "TaxaInicios", "TaxaReativacao", "TaxaReinicios",
-        "ReceitaTotalMes", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora", "Itens/Pedido",
-        "ReaisPorAtivo", "%daBaseTotal", "%doFatTotal",
+        "A0aA3", "%daBaseTotal", "%doFatTotal", "%Ativos", "TaxaInicios", "TaxaReativacao", "TaxaReinicios",
+        "%Retirada", "ReceitaTotalMes", "Pedidos/Dia", "Pedidos/Hora", "Faturamento/Hora", "Itens/Pedido",
+        "ReaisPorAtivo",
     ],
 }
 
@@ -2998,9 +3095,199 @@ def _normalize_cols_for_dataset(df: pd.DataFrame, nome: str) -> pd.DataFrame:
     aliases = ALIASES_BY_SCHEMA.get(nome, {})
     if aliases:
         out = out.rename(columns={col: aliases.get(col, col) for col in out.columns})
+    if nome == "fFaturamento2":
+        normalized_alias_map = {
+            "bcps": "BCPS",
+            "bpcs": "BCPS",
+            "praca": "Praça",
+        }
+        for col in list(out.columns):
+            canonical = normalized_alias_map.get(_normalize_col_name(col))
+            if canonical is None or col == canonical:
+                continue
+            if canonical in out.columns:
+                base_vals = out[canonical]
+                incoming_vals = out[col]
+                out[canonical] = base_vals.combine_first(incoming_vals)
+                out = out.drop(columns=[col])
+            else:
+                out = out.rename(columns={col: canonical})
     if nome == "dPessoas":
         out = _standardize_cols(out)
     return out
+
+
+def _normalize_bcps_token(value: object) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in {"NAN", "NONE", "<NA>"}:
+        return ""
+    num = safe_float(value, np.nan)
+    if pd.notna(num):
+        try:
+            if float(num).is_integer():
+                return str(int(float(num)))
+        except Exception:
+            pass
+    text = text.replace(" ", "")
+    return text.upper()
+
+
+def _find_column_by_normalized_name(df: pd.DataFrame, normalized_name: str) -> Optional[str]:
+    for col in df.columns:
+        if _normalize_col_name(col) == normalized_name:
+            return col
+    return None
+
+
+def _canonicalize_faturamento_loja_by_bcps(df: pd.DataFrame) -> Tuple[pd.DataFrame, int, int]:
+    """Padroniza Loja no upload de fFaturamento2 usando BCPS como chave canônica."""
+    if df is None or df.empty:
+        return df, 0, 0
+    bcps_col = _find_column_by_normalized_name(df, "bcps")
+    if bcps_col is None:
+        return df, 0, 0
+    out = df.copy()
+    if "Loja" not in out.columns:
+        out["Loja"] = ""
+
+    indicadores = st.session_state.get("fIndicadores")
+    if indicadores is None or indicadores.empty:
+        return out, 0, 0
+    bcps_ref_col = _find_column_by_normalized_name(indicadores, "bcps")
+    loja_ref_col = _find_column_by_normalized_name(indicadores, "loja")
+    if bcps_ref_col is None or loja_ref_col is None:
+        return out, 0, 0
+
+    ref = indicadores[[bcps_ref_col, loja_ref_col]].copy()
+    ref["_bcps_key"] = ref[bcps_ref_col].apply(_normalize_bcps_token)
+    ref["_loja"] = ref[loja_ref_col].fillna("").astype(str).str.strip()
+    loja_upper = ref["_loja"].str.upper()
+    ref = ref[
+        ref["_bcps_key"].ne("")
+        & ref["_loja"].ne("")
+        & loja_upper.ne("TOTAL")
+        & loja_upper.ne("NAN")
+        & loja_upper.ne("NONE")
+    ]
+    if ref.empty:
+        return out, 0, 0
+
+    bcps_to_loja = (
+        ref.groupby("_bcps_key")["_loja"]
+        .agg(lambda s: s.value_counts().index[0])
+        .to_dict()
+    )
+    if not bcps_to_loja:
+        return out, 0, 0
+
+    bcps_keys = out[bcps_col].apply(_normalize_bcps_token)
+    mapped_loja = bcps_keys.map(bcps_to_loja)
+    current_loja = out["Loja"].fillna("").astype(str).str.strip()
+    can_update = mapped_loja.notna()
+    changed = int((can_update & current_loja.ne(mapped_loja.fillna(""))).sum())
+    unresolved = int((bcps_keys.ne("") & mapped_loja.isna()).sum())
+    out.loc[can_update, "Loja"] = mapped_loja.loc[can_update]
+    return out, changed, unresolved
+
+
+def _backfill_faturamento_store_metadata(df: pd.DataFrame) -> Tuple[pd.DataFrame, int, int]:
+    """Preenche BCPS/Praça faltantes em fFaturamento2 com base na loja de fIndicadores."""
+    if df is None or df.empty or "Loja" not in df.columns:
+        return df, 0, 0
+    indicadores = st.session_state.get("fIndicadores")
+    if indicadores is None or indicadores.empty or "Loja" not in indicadores.columns:
+        return df, 0, 0
+
+    out = _ensure_loja_key(df.copy())
+    ref = _ensure_loja_key(indicadores.copy())
+    if "Loja_norm" not in out.columns or "Loja_norm" not in ref.columns:
+        return df, 0, 0
+
+    bcps_ref_col = _find_column_by_normalized_name(ref, "bcps")
+    praca_ref_col = _find_praca_col(ref)
+
+    # Mantem apenas lojas validas para mapear metadados.
+    loja_ok = ref["Loja_norm"].fillna("").astype(str).str.strip().ne("")
+    ref = ref.loc[loja_ok].copy()
+    if ref.empty:
+        return df, 0, 0
+
+    filled_bcps = 0
+    if bcps_ref_col is not None:
+        ref["_bcps_val"] = ref[bcps_ref_col].fillna("").astype(str).str.strip()
+        ref = ref[~ref["_bcps_val"].str.upper().isin(["", "NAN", "NONE", "<NA>"])]
+        bcps_map = (
+            ref.groupby("Loja_norm")["_bcps_val"]
+            .agg(lambda s: s.value_counts().index[0])
+            .to_dict()
+        )
+        if bcps_map:
+            if "BCPS" not in out.columns:
+                out["BCPS"] = pd.NA
+            bcps_text = out["BCPS"].fillna("").astype(str).str.strip()
+            bcps_blank = bcps_text.str.upper().isin(["", "NAN", "NONE", "<NA>"])
+            mapped_bcps = out["Loja_norm"].map(bcps_map)
+            can_fill_bcps = bcps_blank & mapped_bcps.notna()
+            filled_bcps = int(can_fill_bcps.sum())
+            out.loc[can_fill_bcps, "BCPS"] = mapped_bcps.loc[can_fill_bcps]
+
+    filled_praca = 0
+    if praca_ref_col is not None:
+        ref_praca = _ensure_loja_key(indicadores.copy())
+        ref_praca["_praca_val"] = ref_praca[praca_ref_col].fillna("").astype(str).str.strip()
+        ref_praca = ref_praca[
+            ref_praca["Loja_norm"].fillna("").astype(str).str.strip().ne("")
+            & ~ref_praca["_praca_val"].str.upper().isin(["", "NAN", "NONE", "<NA>"])
+        ]
+        praca_map = (
+            ref_praca.groupby("Loja_norm")["_praca_val"]
+            .agg(lambda s: s.value_counts().index[0])
+            .to_dict()
+        )
+        if praca_map:
+            praca_target_col = _find_praca_col(out) or "Praça"
+            if praca_target_col not in out.columns:
+                out[praca_target_col] = pd.NA
+            praca_text = out[praca_target_col].fillna("").astype(str).str.strip()
+            praca_blank = praca_text.str.upper().isin(["", "NAN", "NONE", "<NA>"])
+            mapped_praca = out["Loja_norm"].map(praca_map)
+            can_fill_praca = praca_blank & mapped_praca.notna()
+            filled_praca = int(can_fill_praca.sum())
+            out.loc[can_fill_praca, praca_target_col] = mapped_praca.loc[can_fill_praca]
+
+    if "Loja_norm" in out.columns:
+        out = out.drop(columns=["Loja_norm"])
+    return out, filled_bcps, filled_praca
+
+
+def _drop_rows_with_invalid_keys(df: pd.DataFrame, key_cols: List[str]) -> tuple[pd.DataFrame, int]:
+    """Remove linhas sem valores válidos nas colunas-chave do upload."""
+    if df is None or df.empty:
+        return df, 0
+    valid_keys = [c for c in (key_cols or []) if c in df.columns]
+    if not valid_keys:
+        return df, 0
+    out = df.copy()
+    keep = pd.Series([True] * len(out), index=out.index)
+    for key in valid_keys:
+        col = out[key]
+        if key == "Loja":
+            loja = col.fillna("").astype(str).str.strip()
+            key_ok = loja.ne("") & loja.str.upper().ne("NAN") & loja.str.upper().ne("NONE")
+        else:
+            if pd.api.types.is_datetime64_any_dtype(col):
+                key_ok = col.notna()
+            else:
+                txt = col.fillna("").astype(str).str.strip()
+                key_ok = txt.ne("") & txt.str.upper().ne("NAN") & txt.str.upper().ne("NONE")
+        keep &= key_ok
+    dropped = int((~keep).sum())
+    return out.loc[keep].reset_index(drop=True), dropped
 
 
 def _upsert_critical_columns(
@@ -3260,6 +3547,7 @@ def render_append(nome: str, schema_fn, subset_cols):
     if up is not None:
         df_up = read_csv_with_schema(up, schema)
         df_up = _normalize_cols_for_dataset(df_up, nome)
+        st.session_state[nome] = _normalize_cols_for_dataset(st.session_state.get(nome), nome)
         before_drop = len(df_up)
         df_up = _drop_total_rows_for_upload(df_up, nome)
         dropped_total_rows = max(0, before_drop - len(df_up))
@@ -3279,8 +3567,29 @@ def render_append(nome: str, schema_fn, subset_cols):
         if not allowed_cols:
             st.error("Nenhuma coluna crítica foi encontrada no arquivo de upload.")
         else:
-            work_up = df_up[[c for c in dict.fromkeys((subset_cols or []) + allowed_cols) if c in df_up.columns]].copy()
+            upload_cols = list(dict.fromkeys((subset_cols or []) + allowed_cols))
+            if nome == "fFaturamento2":
+                bcps_upload_col = _find_column_by_normalized_name(df_up, "bcps")
+                if bcps_upload_col and bcps_upload_col not in upload_cols:
+                    upload_cols.append(bcps_upload_col)
+            work_up = df_up[[c for c in upload_cols if c in df_up.columns]].copy()
+            if nome == "fFaturamento2":
+                work_up, changed_lojas, unresolved_bcps = _canonicalize_faturamento_loja_by_bcps(work_up)
+                if changed_lojas > 0:
+                    st.info(
+                        f"{changed_lojas} linha(s) de fFaturamento2 tiveram o nome da loja padronizado via BCPS."
+                    )
+                if unresolved_bcps > 0:
+                    st.warning(
+                        f"{unresolved_bcps} linha(s) de fFaturamento2 possuem BCPS sem correspondencia em fIndicadores."
+                    )
             work_up = work_up.dropna(how="all")
+            work_up, dropped_invalid_keys = _drop_rows_with_invalid_keys(work_up, subset_cols)
+            if dropped_invalid_keys > 0:
+                st.warning(
+                    f"Foram ignoradas {dropped_invalid_keys} linha(s) com chave vazia/inválida "
+                    f"({', '.join(subset_cols)})."
+                )
             if work_up.empty:
                 st.error("Upload sem linhas válidas para atualização.")
                 st.dataframe(st.session_state[nome].tail(100), use_container_width=True)
@@ -3289,8 +3598,16 @@ def render_append(nome: str, schema_fn, subset_cols):
                 st.session_state.get(nome),
                 work_up,
                 subset_cols,
-                critical_cols,
+                allowed_cols,
             )
+            if nome == "fFaturamento2":
+                st.session_state[nome], filled_bcps, filled_praca = _backfill_faturamento_store_metadata(
+                    st.session_state[nome]
+                )
+                if filled_bcps > 0:
+                    st.info(f"{filled_bcps} linha(s) de fFaturamento2 tiveram BCPS preenchido pela referência de loja.")
+                if filled_praca > 0:
+                    st.info(f"{filled_praca} linha(s) de fFaturamento2 tiveram Praça preenchida pela referência de loja.")
             if nome in ("fIndicadores", "dPessoas"):
                 st.session_state[nome] = _standardize_cols(st.session_state[nome])
             

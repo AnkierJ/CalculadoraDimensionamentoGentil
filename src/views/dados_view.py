@@ -3,7 +3,7 @@
 # =============================================================================
 import math
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -55,6 +55,52 @@ def _persist_session_data(paths: Dict[str, Path]) -> None:
             continue
         target_path.parent.mkdir(parents=True, exist_ok=True)
         df_out.to_csv(target_path, index=False, sep=";", decimal=",", encoding="utf-8-sig")
+
+
+def _build_upload_template_df(nome: str, key_cols: List[str], critical_cols: List[str]) -> pd.DataFrame:
+    """Build a template with store-identification columns plus key and critical upload columns."""
+    id_priority = ["BCPS", "SAP", "Estado", "Praça", "Praca", "Loja"]
+    id_source = st.session_state.get("fIndicadores")
+    base_df = st.session_state.get(nome)
+
+    if isinstance(id_source, pd.DataFrame) and not id_source.empty and "Loja" in id_source.columns:
+        id_cols = [c for c in id_priority if c in id_source.columns]
+        template = id_source[id_cols].copy()
+        template["Loja"] = template["Loja"].astype(str).str.strip()
+        template = template[template["Loja"] != ""].drop_duplicates(subset=["Loja"])
+    elif isinstance(base_df, pd.DataFrame) and not base_df.empty:
+        id_cols = [c for c in id_priority if c in base_df.columns]
+        template = base_df[id_cols].copy() if id_cols else pd.DataFrame(index=base_df.index)
+        if "Loja" in template.columns:
+            template["Loja"] = template["Loja"].astype(str).str.strip()
+            template = template[template["Loja"] != ""].drop_duplicates(subset=["Loja"])
+    else:
+        id_cols = []
+        template = pd.DataFrame(columns=["Loja"])
+
+    template = template.reset_index(drop=True)
+    required_cols = list(dict.fromkeys((key_cols or []) + (critical_cols or [])))
+    ordered_cols = list(dict.fromkeys(id_cols + required_cols))
+
+    for col in ordered_cols:
+        if col not in template.columns:
+            template[col] = pd.NA
+
+    return template[ordered_cols]
+
+
+def _render_upload_template_download(nome: str, key_cols: List[str], critical_cols: List[str]) -> None:
+    template_df = _build_upload_template_df(nome, key_cols, critical_cols)
+    csv_bytes = template_df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+    st.download_button(
+        label=f"Baixar modelo de upload ({nome})",
+        data=csv_bytes,
+        file_name=f"modelo_upload_{nome}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"download_template_{nome}",
+        help="Modelo com identificacao de loja e colunas criticas para upload incremental.",
+    )
 
 
 # =============================================================================
@@ -138,11 +184,13 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                 crit, der = get_upload_column_rules("dAmostras")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
                 st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
+                _render_upload_template_download("dAmostras", ["Loja", "Processo", "Amostra"], crit)
                 render_append("dAmostras", get_schema_dAmostras, ["Loja", "Processo", "Amostra"])
             with tabs[1]:
                 crit, der = get_upload_column_rules("dEstrutura")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
                 st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
+                _render_upload_template_download("dEstrutura", ["Loja"], crit)
                 render_append("dEstrutura", get_schema_dEstrutura, ["Loja"])
             with tabs[2]:
                 crit, der = get_upload_column_rules("dPessoas")
@@ -151,16 +199,19 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                     "exceto TOTAL, TotalMapeado, SalarioMapeado e %disp."
                 )
                 st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
+                _render_upload_template_download("dPessoas", ["Loja"], crit)
                 render_append("dPessoas", get_schema_dPessoas, ["Loja"])
             with tabs[3]:
                 crit, der = get_upload_column_rules("fFaturamento2")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
                 st.caption("Colunas derivadas impactadas em outras bases são recalculadas automaticamente.")
+                _render_upload_template_download("fFaturamento2", ["Loja", "Data"], crit)
                 render_append("fFaturamento2", get_schema_fFaturamento2, ["Loja", "Data"])
             with tabs[4]:
                 crit, der = get_upload_column_rules("fIndicadores")
                 st.info(f"**Colunas críticas (atualizadas pelo upload):** {', '.join(crit)}")
                 st.caption(f"Colunas derivadas (recalculadas automaticamente): {', '.join(der)}")
+                _render_upload_template_download("fIndicadores", ["Loja"], crit)
                 render_append("fIndicadores", get_schema_fIndicadores, ["Loja"])
             st.divider()
             st.warning(
@@ -347,6 +398,12 @@ def render_dados_tab(tab_dados: DeltaGenerator, paths: Dict[str, Path]) -> None:
                     "Faturamento/SalarioMap*IAF25": ratio_salario_iaf,
                 }
             )
+
+            # Remove linhas sem identificacao valida de loja para nao poluir a analise.
+            loja_clean = base_df["Loja"].fillna("").astype(str).str.strip()
+            valid_loja = (loja_clean != "") & (loja_clean.str.upper() != "NAN")
+            base_df = base_df.loc[valid_loja].copy()
+            base_df["Loja"] = loja_clean.loc[base_df.index]
 
             porte_opts = ["Todos"] + sorted(base_df["Porte"].dropna().unique().tolist())
             praca_opts = ["Todas"] + sorted(base_df["Praca"].dropna().unique().tolist())
